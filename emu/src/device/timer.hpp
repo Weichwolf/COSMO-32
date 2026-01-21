@@ -1,55 +1,44 @@
 #pragma once
 #include "../bus.hpp"
+#include <chrono>
 #include <cstdint>
 
 namespace cosmo {
 
-// SysTick Timer (RISC-V style, based on mtime/mtimecmp)
-// Memory-mapped at 0xE000_0000 region alongside PFIC
+// RISC-V mtime/mtimecmp style timer
+// Memory-mapped at 0xE000_0000
 //
 // Registers:
-//   0x00 CTRL    - Control (enable, interrupt enable)
-//   0x04 SR      - Status (count flag)
-//   0x08 CNT_LO  - Current count low
-//   0x0C CNT_HI  - Current count high
-//   0x10 CMP_LO  - Compare value low
-//   0x14 CMP_HI  - Compare value high
-//   0x18 RELOAD  - Auto-reload value (for periodic mode)
+//   0x00 MTIME_LO  - Current time low (ms since boot)
+//   0x04 MTIME_HI  - Current time high
+//   0x08 MTIMECMP_LO - Compare value low
+//   0x0C MTIMECMP_HI - Compare value high
 //
-// Simplified compared to full mtime, optimized for SysTick use case
+// Timer uses wall-clock time for accurate uptime display
 
 class SysTickTimer : public Device {
 public:
-    // Control register bits
-    static constexpr uint32_t CTRL_ENABLE = 1 << 0;   // Timer enable
-    static constexpr uint32_t CTRL_TICKINT = 1 << 1;  // Interrupt enable
-    static constexpr uint32_t CTRL_MODE = 1 << 2;     // 0=one-shot, 1=periodic
-
-    // Status register bits
-    static constexpr uint32_t SR_CNTIF = 1 << 0;      // Count reached compare
-
-    // Interrupt number for PFIC
-    static constexpr uint32_t IRQ_NUM = 12;  // SysTick interrupt
+    static constexpr uint32_t IRQ_NUM = 7;  // Machine timer interrupt
 
 private:
-    uint32_t ctrl_ = 0;
-    uint32_t sr_ = 0;
-    uint64_t cnt_ = 0;
-    uint64_t cmp_ = 0;
-    uint32_t reload_ = 0;
-
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point start_time_ = Clock::now();
+    uint64_t mtimecmp_ = 0;
     bool irq_pending_ = false;
+
+    uint64_t mtime_ms() const {
+        auto now = Clock::now();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time_).count();
+    }
 
 public:
     uint32_t read(uint32_t addr, Width) override {
+        uint64_t mtime = mtime_ms();
         switch (addr) {
-            case 0x00: return ctrl_;
-            case 0x04: return sr_;
-            case 0x08: return static_cast<uint32_t>(cnt_);
-            case 0x0C: return static_cast<uint32_t>(cnt_ >> 32);
-            case 0x10: return static_cast<uint32_t>(cmp_);
-            case 0x14: return static_cast<uint32_t>(cmp_ >> 32);
-            case 0x18: return reload_;
+            case 0x00: return static_cast<uint32_t>(mtime);
+            case 0x04: return static_cast<uint32_t>(mtime >> 32);
+            case 0x08: return static_cast<uint32_t>(mtimecmp_);
+            case 0x0C: return static_cast<uint32_t>(mtimecmp_ >> 32);
             default:   return 0;
         }
     }
@@ -57,72 +46,35 @@ public:
     void write(uint32_t addr, Width, uint32_t val) override {
         switch (addr) {
             case 0x00:
-                ctrl_ = val;
-                if (!(val & CTRL_ENABLE)) {
-                    irq_pending_ = false;
-                }
+                // Writing mtime resets the start time (offset)
+                start_time_ = Clock::now();
                 break;
             case 0x04:
-                // Writing clears status flags
-                sr_ &= ~val;
-                if (val & SR_CNTIF) {
-                    irq_pending_ = false;
-                }
+                // Ignore high word write for simplicity
                 break;
             case 0x08:
-                cnt_ = (cnt_ & 0xFFFFFFFF00000000ULL) | val;
+                mtimecmp_ = (mtimecmp_ & 0xFFFFFFFF00000000ULL) | val;
+                irq_pending_ = false;
                 break;
             case 0x0C:
-                cnt_ = (cnt_ & 0xFFFFFFFFULL) | (static_cast<uint64_t>(val) << 32);
-                break;
-            case 0x10:
-                cmp_ = (cmp_ & 0xFFFFFFFF00000000ULL) | val;
-                break;
-            case 0x14:
-                cmp_ = (cmp_ & 0xFFFFFFFFULL) | (static_cast<uint64_t>(val) << 32);
-                break;
-            case 0x18:
-                reload_ = val;
+                mtimecmp_ = (mtimecmp_ & 0xFFFFFFFFULL) | (static_cast<uint64_t>(val) << 32);
                 break;
         }
     }
 
     std::optional<Interrupt> tick(uint64_t) override {
-        if (!(ctrl_ & CTRL_ENABLE)) {
-            return {};
+        if (mtimecmp_ != 0 && mtime_ms() >= mtimecmp_ && !irq_pending_) {
+            irq_pending_ = true;
+            return Interrupt{IRQ_NUM};
         }
-
-        cnt_++;
-
-        if (cnt_ >= cmp_ && cmp_ != 0) {
-            sr_ |= SR_CNTIF;
-
-            if (ctrl_ & CTRL_MODE) {
-                // Periodic mode - reload
-                cnt_ = 0;
-                if (reload_ != 0) {
-                    cmp_ = reload_;
-                }
-            } else {
-                // One-shot - disable
-                ctrl_ &= ~CTRL_ENABLE;
-            }
-
-            if ((ctrl_ & CTRL_TICKINT) && !irq_pending_) {
-                irq_pending_ = true;
-                return Interrupt{IRQ_NUM};
-            }
-        }
-
         return {};
     }
 
     bool has_pending_irq() const { return irq_pending_; }
     void clear_irq() { irq_pending_ = false; }
 
-    // Direct access for testing
-    uint64_t count() const { return cnt_; }
-    void set_count(uint64_t v) { cnt_ = v; }
+    uint64_t count() const { return mtime_ms(); }
+    void set_count(uint64_t) { start_time_ = Clock::now(); }
 };
 
 } // namespace cosmo
