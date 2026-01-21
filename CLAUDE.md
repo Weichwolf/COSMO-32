@@ -36,7 +36,9 @@ COSMO-32/
 │   │   ├── main.S                # Main Entry
 │   │   ├── shell.S               # Shell + I/O
 │   │   ├── net.S                 # UDP/TFTP Client
-│   │   └── basic.c               # BASIC-Interpreter
+│   │   ├── basic.c               # BASIC-Interpreter
+│   │   ├── display.c             # Display-Treiber (80x50 Terminal)
+│   │   └── font8x8.h             # 8x8 Bitmap-Font (CP437-Style)
 │   ├── link.ld
 │   └── Makefile
 ├── tests/custom/                 # CPU + Peripheral Tests (19 Tests)
@@ -56,9 +58,10 @@ make -C os                                               # OS
 ## Ausführen
 
 ```bash
-./emu/build/cosmo32.exe os/firmware.bin                  # Interaktiv
+./emu/build/cosmo32.exe os/firmware.bin                  # Interaktiv (SDL2 Fenster)
 ./emu/build/cosmo32.exe --run-tests tests/custom/        # 19 Tests
-./emu/build/cosmo32.exe --headless os/firmware.bin --cmd "basic apps/hello.bas" --timeout 5000
+./emu/build/cosmo32.exe --headless os/firmware.bin --cmd "help" --timeout 2000
+./emu/build/cosmo32.exe --headless os/firmware.bin --timeout 500 --screenshot out.ppm
 ```
 
 Shell-Befehle: `help` zeigt alle. BASIC: `basic` (interaktiv) oder `basic apps/file.bas`.
@@ -88,11 +91,11 @@ Logging bei Fehlern (stderr):
 
 ## Status
 
-**Emulator:** CPU, Bus, USART, Timer, PFIC, DMA, FSMC, Display, I2S, ETH (19 Tests pass)
+**Emulator:** CPU, Bus, USART, Timer, PFIC, DMA, FSMC, Display, I2S, ETH, SDL2 Frontend (19 Tests pass)
 
-**OS:** Shell, Netzwerk-Stack (UDP/TFTP), BASIC-Interpreter
+**OS:** Shell, Netzwerk-Stack (UDP/TFTP), BASIC-Interpreter, Display-Treiber (80×50 Terminal)
 
-**Offen:** SDL2 Frontend (Display/Audio), GDB Stub, TAP-Backend
+**Offen:** GDB Stub, TAP-Backend, Audio-Output (I2S→SDL vorbereitet)
 
 ## Architektur-Entscheidungen
 
@@ -100,6 +103,8 @@ Logging bei Fehlern (stderr):
 - `PacketBuilder` für ETH-Pakete mit Bounds-Checks (assert)
 - USART RX-Queue auf 4KB limitiert (verhindert Memory-Overflow)
 - decode.hpp vollständig dokumentiert (RV32C Instruction Expansion)
+- Display: Dual-Output via `putchar` (USART + Framebuffer), 4bpp mit CGA-Palette
+- Linker-Script inkludiert `.sdata/.sbss` für RISC-V small data sections
 
 ## Nicht-Ziele
 

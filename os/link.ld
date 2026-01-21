@@ -27,6 +27,7 @@ SECTIONS
     .data : {
         _data_start = .;
         *(.data .data.*)
+        *(.sdata .sdata.*)
         _data_end = .;
     } > SRAM AT > FLASH
 
@@ -36,6 +37,7 @@ SECTIONS
     .bss : {
         _bss_start = .;
         *(.bss .bss.*)
+        *(.sbss .sbss.*)
         *(COMMON)
         _bss_end = .;
     } > SRAM

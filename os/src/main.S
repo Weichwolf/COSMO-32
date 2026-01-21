@@ -8,6 +8,9 @@ main:
     # Shell initialisieren
     call    shell_init
 
+    # Display initialisieren
+    call    display_init
+
     # Shell starten (kehrt nie zurück)
     call    shell_run
 

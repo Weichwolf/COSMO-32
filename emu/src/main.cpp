@@ -217,11 +217,77 @@ bool run_tests(const char* dir_path) {
     return failed == 0;
 }
 
+// RGB565 to RGB888 conversion
+inline void rgb565_to_rgb888(uint16_t c, uint8_t& r, uint8_t& g, uint8_t& b) {
+    r = ((c >> 11) & 0x1F) << 3;
+    g = ((c >> 5) & 0x3F) << 2;
+    b = (c & 0x1F) << 3;
+}
+
+// Audio callback - called by SDL from audio thread
+void audio_callback(void* userdata, Uint8* stream, int len) {
+    auto* i2s = static_cast<cosmo::I2S*>(userdata);
+    auto* out = reinterpret_cast<int16_t*>(stream);
+    size_t samples = len / 4;  // Stereo 16-bit = 4 bytes per sample
+
+    size_t filled = i2s->read_samples(out, samples);
+
+    // Silence for unfilled portion
+    if (filled < samples) {
+        std::memset(out + filled * 2, 0, (samples - filled) * 4);
+    }
+}
+
+// Render framebuffer to SDL texture
+void render_framebuffer(SDL_Texture* texture, const cosmo::FSMC& fsmc,
+                        const cosmo::DisplayControl& display) {
+    void* pixels;
+    int pitch;
+
+    if (SDL_LockTexture(texture, nullptr, &pixels, &pitch) != 0) return;
+
+    auto* dst = static_cast<uint32_t*>(pixels);
+    const uint8_t* fb = fsmc.framebuffer();
+    const auto& palette = display.palette();
+    int w = display.width();
+    int h = display.height();
+
+    if (display.mode() == cosmo::DisplayMode::Mode0_640x400x4bpp) {
+        // 4bpp indexed: 2 pixels per byte
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x += 2) {
+                uint8_t byte = fb[(y * w + x) / 2];
+                uint8_t idx0 = byte & 0x0F;
+                uint8_t idx1 = (byte >> 4) & 0x0F;
+
+                uint8_t r, g, b;
+                rgb565_to_rgb888(palette[idx0], r, g, b);
+                dst[y * (pitch / 4) + x] = (r << 16) | (g << 8) | b;
+
+                rgb565_to_rgb888(palette[idx1], r, g, b);
+                dst[y * (pitch / 4) + x + 1] = (r << 16) | (g << 8) | b;
+            }
+        }
+    } else {
+        // 16bpp RGB565 direct
+        const auto* fb16 = reinterpret_cast<const uint16_t*>(fb);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                uint8_t r, g, b;
+                rgb565_to_rgb888(fb16[y * w + x], r, g, b);
+                dst[y * (pitch / 4) + x] = (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+
+    SDL_UnlockTexture(texture);
+}
+
 // Interactive emulator with SDL
 void run_emulator(const char* firmware_path) {
     SDL_SetMainReady();
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS) < 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return;
     }
@@ -238,9 +304,76 @@ void run_emulator(const char* firmware_path) {
         return;
     }
 
+    // Create window (2x scale for visibility)
+    constexpr int SCALE = 2;
+    int win_w = cosmo::DisplayControl::MODE0_WIDTH * SCALE;
+    int win_h = cosmo::DisplayControl::MODE0_HEIGHT * SCALE;
+
+    SDL_Window* window = SDL_CreateWindow(
+        "COSMO-32",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        win_w, win_h,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
+    );
+
+    if (!window) {
+        std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return;
+    }
+
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+
+    if (!renderer) {
+        std::fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+
+    // Create textures for both modes
+    SDL_Texture* tex_mode0 = SDL_CreateTexture(renderer,
+        SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING,
+        cosmo::DisplayControl::MODE0_WIDTH, cosmo::DisplayControl::MODE0_HEIGHT);
+
+    SDL_Texture* tex_mode1 = SDL_CreateTexture(renderer,
+        SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING,
+        cosmo::DisplayControl::MODE1_WIDTH, cosmo::DisplayControl::MODE1_HEIGHT);
+
+    if (!tex_mode0 || !tex_mode1) {
+        std::fprintf(stderr, "SDL_CreateTexture failed: %s\n", SDL_GetError());
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return;
+    }
+
+    // Setup audio
+    SDL_AudioSpec want{}, have{};
+    want.freq = emu.i2s.sample_rate();
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 1024;
+    want.callback = audio_callback;
+    want.userdata = &emu.i2s;
+
+    SDL_AudioDeviceID audio_dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    if (audio_dev == 0) {
+        std::fprintf(stderr, "SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+    } else {
+        SDL_PauseAudioDevice(audio_dev, 0);  // Start playback
+    }
+
     std::printf("COSMO-32 Emulator\n");
     std::printf("Firmware: %s\n", firmware_path);
-    std::printf("Running...\n");
+    std::printf("Display: %dx%d\n", emu.display.width(), emu.display.height());
+    std::printf("Audio: %d Hz\n", have.freq);
+    std::printf("Running... (ESC to quit)\n");
+
+    SDL_StartTextInput();
 
     constexpr uint64_t CYCLES_PER_FRAME = 144'000'000 / 60;
 
@@ -248,10 +381,28 @@ void run_emulator(const char* firmware_path) {
     while (running && !emu.cpu.halted) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) running = false;
-            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) running = false;
+            switch (event.type) {
+                case SDL_QUIT:
+                    running = false;
+                    break;
+
+                case SDL_KEYDOWN:
+                    if (event.key.keysym.sym == SDLK_ESCAPE) {
+                        running = false;
+                    } else if (event.key.keysym.sym == SDLK_RETURN) {
+                        emu.usart1.queue_input("\n");
+                    } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
+                        emu.usart1.queue_input("\b");
+                    }
+                    break;
+
+                case SDL_TEXTINPUT:
+                    emu.usart1.queue_input(event.text.text);
+                    break;
+            }
         }
 
+        // Run CPU for one frame
         uint64_t target = emu.cpu.cycles + CYCLES_PER_FRAME;
         while (emu.cpu.cycles < target && !emu.cpu.halted) {
             emu.tick_peripherals();
@@ -264,16 +415,79 @@ void run_emulator(const char* firmware_path) {
             }
         }
 
-        SDL_Delay(16);
+        // Render display
+        SDL_Texture* active_tex = (emu.display.mode() == cosmo::DisplayMode::Mode0_640x400x4bpp)
+                                  ? tex_mode0 : tex_mode1;
+        render_framebuffer(active_tex, emu.fsmc, emu.display);
+
+        SDL_RenderClear(renderer);
+        SDL_RenderCopy(renderer, active_tex, nullptr, nullptr);
+        SDL_RenderPresent(renderer);
     }
 
     std::printf("Emulator stopped after %lu cycles\n", static_cast<unsigned long>(emu.cpu.cycles));
+
+    // Cleanup
+    if (audio_dev) SDL_CloseAudioDevice(audio_dev);
+    SDL_DestroyTexture(tex_mode0);
+    SDL_DestroyTexture(tex_mode1);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
     SDL_Quit();
+}
+
+// Save framebuffer as PPM screenshot
+void save_screenshot(const char* path, const cosmo::FSMC& fsmc, const cosmo::DisplayControl& display) {
+    FILE* f = std::fopen(path, "wb");
+    if (!f) {
+        std::fprintf(stderr, "Failed to save screenshot: %s\n", path);
+        return;
+    }
+
+    int w = display.width();
+    int h = display.height();
+    const uint8_t* fb = fsmc.framebuffer();
+    const auto& palette = display.palette();
+
+    std::fprintf(f, "P6\n%d %d\n255\n", w, h);
+
+    if (display.mode() == cosmo::DisplayMode::Mode0_640x400x4bpp) {
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int byte_offset = (y * w + x) / 2;
+                uint8_t byte = fb[byte_offset];
+                uint8_t idx = (x & 1) ? ((byte >> 4) & 0x0F) : (byte & 0x0F);
+                uint16_t c = palette[idx];
+                uint8_t r = ((c >> 11) & 0x1F) << 3;
+                uint8_t g = ((c >> 5) & 0x3F) << 2;
+                uint8_t b = (c & 0x1F) << 3;
+                std::fputc(r, f);
+                std::fputc(g, f);
+                std::fputc(b, f);
+            }
+        }
+    } else {
+        const auto* fb16 = reinterpret_cast<const uint16_t*>(fb);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                uint16_t c = fb16[y * w + x];
+                uint8_t r = ((c >> 11) & 0x1F) << 3;
+                uint8_t g = ((c >> 5) & 0x3F) << 2;
+                uint8_t b = (c & 0x1F) << 3;
+                std::fputc(r, f);
+                std::fputc(g, f);
+                std::fputc(b, f);
+            }
+        }
+    }
+
+    std::fclose(f);
+    std::fprintf(stderr, "Screenshot saved: %s\n", path);
 }
 
 // Headless mode
 void run_headless(const char* firmware_path, const char* input_str = nullptr,
-                   uint64_t timeout_ms = 0, bool batch_mode = false) {
+                   uint64_t timeout_ms = 0, bool batch_mode = false, const char* screenshot_path = nullptr) {
     EmulatorContext emu;
 
     emu.usart1.set_output_callback([](char c) {
@@ -313,6 +527,10 @@ void run_headless(const char* firmware_path, const char* input_str = nullptr,
     if (emu.cpu.cycles >= max_cycles && timeout_ms > 0) {
         std::fprintf(stderr, "\nTimeout after %lu ms\n", static_cast<unsigned long>(timeout_ms));
     }
+
+    if (screenshot_path) {
+        save_screenshot(screenshot_path, emu.fsmc, emu.display);
+    }
 }
 
 } // anonymous namespace
@@ -328,6 +546,7 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "  --cmd <command>     Execute single command, then exit\n");
         std::fprintf(stderr, "  --timeout <ms>      Exit after timeout (milliseconds)\n");
         std::fprintf(stderr, "  --batch             Read commands from stdin\n");
+        std::fprintf(stderr, "  --screenshot <path> Save framebuffer as PPM before exit\n");
         return 1;
     }
 
@@ -356,6 +575,7 @@ int main(int argc, char* argv[]) {
         const char* cmd = nullptr;
         uint64_t timeout_ms = 0;
         bool batch_mode = false;
+        const char* screenshot = nullptr;
 
         for (int i = 3; i < argc; i++) {
             if (std::strcmp(argv[i], "--cmd") == 0 && i + 1 < argc) {
@@ -364,10 +584,12 @@ int main(int argc, char* argv[]) {
                 timeout_ms = std::strtoull(argv[++i], nullptr, 10);
             } else if (std::strcmp(argv[i], "--batch") == 0) {
                 batch_mode = true;
+            } else if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
+                screenshot = argv[++i];
             }
         }
 
-        run_headless(firmware, cmd, timeout_ms, batch_mode);
+        run_headless(firmware, cmd, timeout_ms, batch_mode, screenshot);
         return 0;
     }
 

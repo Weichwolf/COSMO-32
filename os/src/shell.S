@@ -627,14 +627,28 @@ send_ping:
 # USART I/O Functions
 #----------------------------------------------------------------------
 
-# putchar: Output a character
+# putchar: Output a character to USART and Display
 # a0 = character
 putchar:
+    addi    sp, sp, -8
+    sw      ra, 0(sp)
+    sw      s0, 4(sp)
+    mv      s0, a0              # Save character
+
+    # Output to USART
     li      t0, USART1_BASE
 1:  lw      t1, USART_STATR(t0)
     andi    t1, t1, STATR_TXE
     beqz    t1, 1b
-    sw      a0, USART_DATAR(t0)
+    sw      s0, USART_DATAR(t0)
+
+    # Output to Display
+    mv      a0, s0
+    call    display_putchar
+
+    lw      ra, 0(sp)
+    lw      s0, 4(sp)
+    addi    sp, sp, 8
     ret
 
 # getchar: Read a character (blocking)
