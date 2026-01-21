@@ -10,8 +10,17 @@
 prompt:         .asciz "> "
 msg_help:       .asciz "Commands: help status regs mem poke net ping ls cat get put run basic exit reset\n"
 msg_status:     .asciz "COSMO-32 OS v0.1\n"
+msg_cpu:        .asciz "CPU:    RV32IMAC @ 144MHz\n"
+msg_ram:        .asciz "RAM:    64KB SRAM + 1MB FSMC\n"
+msg_video:      .asciz "Video:  640x400 @ 4bpp (CGA)\n"
 msg_uptime:     .asciz "Uptime: "
-msg_ms:         .asciz " ms\n"
+msg_stack:      .asciz "Stack:  0x"
+msg_free:       .asciz " free: "
+msg_bytes2:     .asciz " bytes\n"
+msg_ticks:      .asciz "Ticks:  "
+msg_d:          .asciz "d "
+msg_colon2:     .asciz ":"
+msg_nl:         .asciz "\n"
 msg_regs:       .asciz "Registers:\n"
 msg_net_hdr:    .asciz "Network:\n"
 msg_mac:        .asciz "  MAC: "
@@ -214,16 +223,107 @@ do_help:
     j       exec_done
 
 do_status:
+    addi    sp, sp, -16
+    sw      ra, 0(sp)
+    sw      s0, 4(sp)
+    sw      s1, 8(sp)
+    sw      s2, 12(sp)
+
+    # Header
     la      a0, msg_status
     call    print_str
-    # Print uptime
+
+    # CPU info
+    la      a0, msg_cpu
+    call    print_str
+
+    # RAM info
+    la      a0, msg_ram
+    call    print_str
+
+    # Video info
+    la      a0, msg_video
+    call    print_str
+
+    # Uptime: convert ms to d:hh:mm:ss
     la      a0, msg_uptime
     call    print_str
+
     li      t0, TIMER_BASE
-    lw      a0, TIMER_MTIME(t0)
+    lw      s0, TIMER_MTIME(t0)     # s0 = total milliseconds
+    mv      s2, s0                  # save for ticks display
+
+    # ms -> seconds
+    li      t1, 1000
+    divu    s0, s0, t1              # s0 = total seconds
+
+    # seconds -> days, hours, minutes, seconds
+    li      t1, 86400               # seconds per day
+    divu    s1, s0, t1              # s1 = days
+    remu    s0, s0, t1              # s0 = remaining seconds
+
+    # Print days if > 0
+    beqz    s1, skip_days
+    mv      a0, s1
     call    print_dec
-    la      a0, msg_ms
+    la      a0, msg_d
     call    print_str
+skip_days:
+
+    # hours
+    li      t1, 3600
+    divu    a0, s0, t1              # hours
+    remu    s0, s0, t1              # remaining seconds
+    call    print_dec_2digit
+
+    la      a0, msg_colon2
+    call    print_str
+
+    # minutes
+    li      t1, 60
+    divu    a0, s0, t1              # minutes
+    remu    s0, s0, t1              # remaining = seconds
+    call    print_dec_2digit
+
+    la      a0, msg_colon2
+    call    print_str
+
+    # seconds
+    mv      a0, s0
+    call    print_dec_2digit
+
+    la      a0, msg_nl
+    call    print_str
+
+    # Ticks (raw ms)
+    la      a0, msg_ticks
+    call    print_str
+    mv      a0, s2
+    call    print_dec
+    la      a0, msg_nl
+    call    print_str
+
+    # Stack info
+    la      a0, msg_stack
+    call    print_str
+    mv      s1, sp
+    addi    s1, s1, 16              # adjust for our push (s1 = actual SP)
+    mv      a0, s1
+    call    print_hex32
+    la      a0, msg_free
+    call    print_str
+    # Free = SP - SRAM_BASE (stack grows down from top)
+    li      t0, SRAM_BASE
+    sub     a0, s1, t0
+    call    print_dec
+    la      a0, msg_bytes2
+    call    print_str
+
+    lw      ra, 0(sp)
+    lw      s0, 4(sp)
+    lw      s1, 8(sp)
+    lw      s2, 12(sp)
+    addi    sp, sp, 16
     j       exec_done
 
 do_regs:
@@ -970,12 +1070,39 @@ print_dec:
     addi    t1, t1, -1
     add     t5, t2, t1
     lbu     a0, 0(t5)
-    sw      t1, 16(sp)          # Save t1 (putchar uses it)
+    sw      t1, 16(sp)          # Save t1, t2 (putchar clobbers them)
+    sw      t2, 12(sp)
     call    putchar
-    lw      t1, 16(sp)          # Restore t1
+    lw      t1, 16(sp)
+    lw      t2, 12(sp)
     bnez    t1, 3b
 
 print_dec_done:
     lw      ra, 0(sp)
     addi    sp, sp, 20
+    ret
+
+# print_dec_2digit: Print 2-digit decimal with leading zero
+# a0 = value (0-99)
+print_dec_2digit:
+    addi    sp, sp, -8
+    sw      ra, 0(sp)
+    sw      s0, 4(sp)
+    mv      s0, a0
+
+    # Tens digit
+    li      t0, 10
+    divu    a0, s0, t0
+    addi    a0, a0, '0'
+    call    putchar
+
+    # Ones digit
+    li      t0, 10
+    remu    a0, s0, t0
+    addi    a0, a0, '0'
+    call    putchar
+
+    lw      ra, 0(sp)
+    lw      s0, 4(sp)
+    addi    sp, sp, 8
     ret
