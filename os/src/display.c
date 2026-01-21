@@ -10,7 +10,7 @@
 
 // Forward declarations
 void display_clear(void);
-static void set_pixel(int x, int y, uint8_t color);
+void display_pset(int x, int y, uint8_t color);
 static void draw_char(int col, int row, char c, uint8_t fg, uint8_t bg);
 static void scroll(void);
 
@@ -57,7 +57,7 @@ void display_init(void) {
 }
 
 // Set pixel at (x, y) to color index (0-15)
-static void set_pixel(int x, int y, uint8_t color) {
+void display_pset(int x, int y, uint8_t color) {
     if (x < 0 || x >= 640 || y < 0 || y >= 400) return;
 
     int byte_offset = (y * 640 + x) / 2;
@@ -74,6 +74,87 @@ static void set_pixel(int x, int y, uint8_t color) {
     fb[byte_offset] = byte;
 }
 
+// Draw line using Bresenham's algorithm
+void display_line(int x0, int y0, int x1, int y1, uint8_t color) {
+    int dx = x1 - x0;
+    int dy = y1 - y0;
+    int sx = dx >= 0 ? 1 : -1;
+    int sy = dy >= 0 ? 1 : -1;
+    dx = dx >= 0 ? dx : -dx;
+    dy = dy >= 0 ? dy : -dy;
+
+    if (dx > dy) {
+        int err = dx / 2;
+        while (x0 != x1) {
+            display_pset(x0, y0, color);
+            err -= dy;
+            if (err < 0) { y0 += sy; err += dx; }
+            x0 += sx;
+        }
+    } else {
+        int err = dy / 2;
+        while (y0 != y1) {
+            display_pset(x0, y0, color);
+            err -= dx;
+            if (err < 0) { x0 += sx; err += dy; }
+            y0 += sy;
+        }
+    }
+    display_pset(x1, y1, color);
+}
+
+// Draw circle outline using midpoint algorithm
+void display_circle(int cx, int cy, int r, uint8_t color) {
+    int x = r, y = 0, err = 1 - r;
+    while (x >= y) {
+        display_pset(cx + x, cy + y, color);
+        display_pset(cx - x, cy + y, color);
+        display_pset(cx + x, cy - y, color);
+        display_pset(cx - x, cy - y, color);
+        display_pset(cx + y, cy + x, color);
+        display_pset(cx - y, cy + x, color);
+        display_pset(cx + y, cy - x, color);
+        display_pset(cx - y, cy - x, color);
+        y++;
+        if (err < 0) {
+            err += 2 * y + 1;
+        } else {
+            x--;
+            err += 2 * (y - x + 1);
+        }
+    }
+}
+
+// Draw filled circle
+void display_fill_circle(int cx, int cy, int r, uint8_t color) {
+    for (int y = -r; y <= r; y++) {
+        int dx = 0;
+        while (dx * dx + y * y <= r * r) dx++;
+        for (int x = -dx + 1; x < dx; x++) {
+            display_pset(cx + x, cy + y, color);
+        }
+    }
+}
+
+// Flood fill (simple scanline, bounded area)
+void display_paint(int x, int y, uint8_t fill_color, uint8_t border_color) {
+    if (x < 0 || x >= 640 || y < 0 || y >= 400) return;
+
+    // Get current pixel color
+    int byte_offset = (y * 640 + x) / 2;
+    uint8_t byte = fb[byte_offset];
+    uint8_t current = (x & 1) ? (byte >> 4) : (byte & 0x0F);
+
+    if (current == fill_color || current == border_color) return;
+
+    // Simple recursive fill (stack-limited, use for small areas)
+    display_pset(x, y, fill_color);
+    display_paint(x + 1, y, fill_color, border_color);
+    display_paint(x - 1, y, fill_color, border_color);
+    display_paint(x, y + 1, fill_color, border_color);
+    display_paint(x, y - 1, fill_color, border_color);
+}
+
 // Draw character at character position (col, row)
 static void draw_char(int col, int row, char c, uint8_t fg, uint8_t bg) {
     if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
@@ -87,7 +168,7 @@ static void draw_char(int col, int row, char c, uint8_t fg, uint8_t bg) {
         uint8_t bits = glyph[y];
         for (int x = 0; x < 8; x++) {
             uint8_t color = (bits & 0x80) ? fg : bg;
-            set_pixel(px + x, py + y, color);
+            display_pset(px + x, py + y, color);
             bits <<= 1;
         }
     }

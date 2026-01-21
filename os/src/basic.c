@@ -4,11 +4,16 @@
 // Statements: PRINT, LET, INPUT, IF/THEN/ELSE, GOTO, GOSUB/RETURN,
 //             FOR/TO/STEP/NEXT, WHILE/WEND, DIM, DATA/READ/RESTORE,
 //             ON...GOTO/GOSUB, REM, END, STOP
+// Graphics:   CLS, PSET x,y,c, LINE x1,y1,x2,y2,c, CIRCLE x,y,r,c,
+//             FCIRCLE x,y,r,c, PAINT x,y,fill,border
 // Commands:   RUN, LIST, NEW, LOAD, SAVE, BYE
 // Operators:  + - * / MOD, = <> < > <= >=, AND OR NOT
 // Functions:  ABS INT SGN RND, LEN VAL ASC, CHR$ STR$ LEFT$ RIGHT$ MID$
 //             INKEY$ TIMER
 // Variables:  Multi-character names (e.g., COUNT, NAME$), arrays with DIM
+// Colors:     0=Black 1=Blue 2=Green 3=Cyan 4=Red 5=Magenta 6=Brown
+//             7=LightGray 8=DarkGray 9=LightBlue 10=LightGreen 11=LightCyan
+//             12=LightRed 13=LightMagenta 14=Yellow 15=White
 
 #include <stdint.h>
 #include "const.h"
@@ -20,6 +25,14 @@ extern int getchar_nonblock(void);  // Returns -1 if no char available
 extern uint32_t get_timer_ms(void);
 extern int32_t tftp_get(const char *filename);
 extern int32_t tftp_put(const char *filename, const char *data, uint32_t size);
+
+// Graphics functions from display.c
+extern void display_clear(void);
+extern void display_pset(int x, int y, uint8_t color);
+extern void display_line(int x0, int y0, int x1, int y1, uint8_t color);
+extern void display_circle(int cx, int cy, int r, uint8_t color);
+extern void display_fill_circle(int cx, int cy, int r, uint8_t color);
+extern void display_paint(int x, int y, uint8_t fill_color, uint8_t border_color);
 
 //----------------------------------------------------------------------
 // Configuration
@@ -1146,6 +1159,85 @@ static void stmt_restore(void) {
     data_ptr = 0;
 }
 
+//----------------------------------------------------------------------
+// Graphics statements
+//----------------------------------------------------------------------
+
+// CLS - clear screen
+static void stmt_cls(void) {
+    display_clear();
+}
+
+// PSET x, y, color
+static void stmt_pset(void) {
+    skip_spaces();
+    int32_t x = expr();
+    skip_spaces();
+    if (*ptr == ',') ptr++;
+    int32_t y = expr();
+    skip_spaces();
+    int32_t color = 15;  // Default: white
+    if (*ptr == ',') { ptr++; color = expr(); }
+    display_pset(x, y, (uint8_t)color);
+}
+
+// LINE x1, y1, x2, y2, color
+static void stmt_line(void) {
+    skip_spaces();
+    int32_t x1 = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t y1 = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t x2 = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t y2 = expr();
+    skip_spaces();
+    int32_t color = 15;
+    if (*ptr == ',') { ptr++; color = expr(); }
+    display_line(x1, y1, x2, y2, (uint8_t)color);
+}
+
+// CIRCLE x, y, r [, color]
+static void stmt_circle(void) {
+    skip_spaces();
+    int32_t x = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t y = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t r = expr();
+    skip_spaces();
+    int32_t color = 15;
+    if (*ptr == ',') { ptr++; color = expr(); }
+    display_circle(x, y, r, (uint8_t)color);
+}
+
+// FCIRCLE x, y, r [, color] - filled circle
+static void stmt_fcircle(void) {
+    skip_spaces();
+    int32_t x = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t y = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t r = expr();
+    skip_spaces();
+    int32_t color = 15;
+    if (*ptr == ',') { ptr++; color = expr(); }
+    display_fill_circle(x, y, r, (uint8_t)color);
+}
+
+// PAINT x, y, fill_color, border_color
+static void stmt_paint(void) {
+    skip_spaces();
+    int32_t x = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t y = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t fill = expr();
+    skip_spaces(); if (*ptr == ',') ptr++;
+    int32_t border = expr();
+    display_paint(x, y, (uint8_t)fill, (uint8_t)border);
+}
+
 static void stmt_if(void) {
     int32_t cond = expr();
     skip_spaces();
@@ -1206,6 +1298,12 @@ static void execute_line(const char *line) {
         else if (match_keyword("ON")) { stmt_on(); return; }
         else if (match_keyword("READ")) stmt_read();
         else if (match_keyword("RESTORE")) stmt_restore();
+        else if (match_keyword("CLS")) stmt_cls();
+        else if (match_keyword("PSET")) stmt_pset();
+        else if (match_keyword("LINE")) stmt_line();
+        else if (match_keyword("CIRCLE")) stmt_circle();
+        else if (match_keyword("FCIRCLE")) stmt_fcircle();
+        else if (match_keyword("PAINT")) stmt_paint();
         else if (match_keyword("END") || match_keyword("STOP")) { running = 0; return; }
         else if (is_alpha(*ptr)) stmt_let();  // Implicit LET
         else { while (*ptr && *ptr != ':') ptr++; }
