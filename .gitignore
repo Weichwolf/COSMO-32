@@ -1,0 +1,36 @@
+# Build artifacts
+emu/build/
+*.o
+os/*.elf
+os/*.bin
+os/*.map
+os/preprocessed.txt
+tests/custom/*.elf
+tests/custom/*.bin
+tests/custom/*.dump
+
+# Compiler generated
+*.d
+*.su
+compile_commands.json
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Debug
+*.log
+core
+core.*
+
+# Temporary
+*.tmp
+*.bak
+build_out.txt
+test.cpp
+test_simple.cpp

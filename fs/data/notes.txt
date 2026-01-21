@@ -1,0 +1,6 @@
+Shopping List
+-------------
+- Milk
+- Bread
+- Coffee
+- RAM chips (64KB)

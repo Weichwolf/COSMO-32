@@ -1,0 +1,6 @@
+10 REM Simple counting program
+20 FOR COUNT = 1 TO 10
+30 PRINT COUNT
+40 NEXT COUNT
+50 PRINT "Done!"
+60 END
