@@ -1,8 +1,10 @@
 # Emulator Performance Optimierung
 
-Aktuell: **158 MIPS** (Interpreter, kein JIT)
+Aktuell: **175 MIPS** (Release + LTO, Baseline)
 
-Ziel: **300+ MIPS** ohne JIT-Komplexität
+Ziel: **350+ MIPS** ohne JIT-Komplexität
+
+Mit PGO: **248 MIPS** (+42%)
 
 ## Ansätze nach Aufwand/Ertrag
 
@@ -21,15 +23,18 @@ Switch ist ein indirekter Jump der ständig misspredicted wird. Threaded Code: j
 
 ### 2. Profile-Guided Optimization (PGO)
 
-**Aufwand:** 10min | **Erwartung:** +20%
+**Aufwand:** 10min | **Ergebnis:** +42% (175 → 248 MIPS) ✓
 
 ```bash
 # 1. Instrumentierter Build
-cmake -DCMAKE_CXX_FLAGS="-fprofile-generate" ..
-./cosmo32 --run-tests tests/custom/
+cmake -B emu/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_PGO_GEN=ON emu
+ninja -C emu/build
+./emu/build/cosmo32.exe --run-tests tests/custom/
+./emu/build/cosmo32.exe --headless os/firmware.bin --cmd "bench" --timeout 20000
 
 # 2. Optimierter Build mit Profildaten
-cmake -DCMAKE_CXX_FLAGS="-fprofile-use" ..
+cmake -B emu/build -DENABLE_PGO_GEN=OFF -DENABLE_PGO_USE=ON -DENABLE_LTO=ON emu
+ninja -C emu/build
 ```
 
 Compiler optimiert Hot-Paths basierend auf echten Laufzeitdaten.
@@ -91,10 +96,10 @@ export PATH="/c/msys64/ucrt64/bin:/usr/bin:/bin:$PATH"
 
 | Phase | Ansatz | Kumulativ |
 |-------|--------|-----------|
-| 1 | PGO | ~190 MIPS |
-| 2 | Computed Gotos | ~255 MIPS |
-| 3 | Instruction Fusion | ~320 MIPS |
-| 4 | Superblocks | ~480 MIPS |
+| 1 | PGO | **248 MIPS** ✓ |
+| 2 | Computed Gotos | ~335 MIPS |
+| 3 | Instruction Fusion | ~420 MIPS |
+| 4 | Superblocks | ~630 MIPS |
 
 ## Nicht-Ziele
 
