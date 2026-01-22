@@ -1,0 +1,188 @@
+QBASIC 1.1 (MS-DOS 6.22) Feature-Liste
+=======================================
+
+COSMO-32 BASIC: [x] = vorhanden, [ ] = fehlt
+
+KONTROLLFLUSS
+-------------
+[x] FOR...NEXT, STEP
+[x] WHILE...WEND
+[x] IF...THEN (einzeilig)
+[x] IF...THEN...ELSE (einzeilig)
+[ ] IF...THEN...ELSE...END IF (Block)
+[x] GOTO
+[x] GOSUB/RETURN
+[x] ON...GOTO/GOSUB
+[ ] DO...LOOP
+[ ] DO WHILE...LOOP
+[ ] DO UNTIL...LOOP
+[ ] DO...LOOP WHILE
+[ ] DO...LOOP UNTIL
+[ ] EXIT DO
+[ ] EXIT FOR
+[ ] SELECT CASE
+
+SUBROUTINEN
+-----------
+[ ] SUB...END SUB
+[ ] FUNCTION...END FUNCTION
+[ ] DECLARE
+[ ] CALL
+[ ] SHARED
+[ ] STATIC
+
+VARIABLEN
+---------
+[x] LET (optional)
+[x] DIM (arrays)
+[ ] REDIM
+[ ] ERASE
+[ ] CONST
+[ ] SWAP
+[ ] OPTION BASE
+[ ] DEFtype (DEFINT, DEFSNG, etc.)
+[ ] TYPE...END TYPE
+
+AUSGABE
+-------
+[x] PRINT
+[x] PRINT mit ; und ,
+[ ] PRINT USING
+[ ] TAB(n)
+[ ] SPC(n)
+[ ] LOCATE row, col
+[ ] COLOR fg [,bg]
+[ ] WIDTH
+[ ] WRITE
+
+EINGABE
+-------
+[x] INPUT
+[x] INPUT "prompt";
+[ ] LINE INPUT
+[ ] INPUT$(n)
+[ ] INKEY$ (haben wir!)
+
+STRING-FUNKTIONEN
+-----------------
+[x] LEN
+[x] LEFT$
+[x] RIGHT$
+[x] MID$ (lesen)
+[ ] MID$ (zuweisen)
+[x] CHR$
+[x] ASC
+[x] STR$
+[x] VAL
+[ ] UCASE$
+[ ] LCASE$
+[ ] LTRIM$
+[ ] RTRIM$
+[ ] INSTR
+[ ] SPACE$
+[ ] STRING$
+[ ] HEX$
+[ ] OCT$
+
+NUMERISCHE FUNKTIONEN
+---------------------
+[x] ABS
+[x] SGN
+[x] INT
+[ ] FIX
+[ ] CINT, CLNG
+[x] RND
+[ ] RANDOMIZE
+[ ] SQR (Wurzel)
+[ ] SIN, COS, TAN
+[ ] ATN, LOG, EXP
+[ ] ^ (Potenz)
+[ ] \ (Integer-Division)
+[ ] MOD (haben wir!)
+
+DATEN
+-----
+[x] DATA
+[x] READ
+[x] RESTORE
+
+GRAFIK (COSMO-32 spezifisch)
+----------------------------
+[x] CLS
+[x] PSET
+[x] LINE (4 Punkte)
+[ ] LINE (x1,y1)-(x2,y2) Syntax
+[ ] LINE ...BF (Box Fill)
+[x] CIRCLE
+[x] FCIRCLE (Erweiterung)
+[x] PAINT
+[ ] DRAW
+[ ] GET/PUT (Sprites)
+[ ] SCREEN
+[ ] PALETTE
+[ ] VIEW
+[ ] WINDOW
+
+DATEI-I/O
+---------
+[ ] OPEN
+[ ] CLOSE
+[ ] INPUT #
+[ ] PRINT #
+[ ] LINE INPUT #
+[ ] WRITE #
+[ ] GET #, PUT #
+[ ] LOF, LOC, EOF
+[ ] SEEK
+[ ] FILES
+[ ] KILL, NAME
+[ ] MKDIR, RMDIR, CHDIR
+
+SONSTIGES
+---------
+[ ] SLEEP
+[ ] BEEP / SOUND
+[ ] PLAY (Musik)
+[ ] TIMER ON/OFF
+[ ] ON ERROR
+[ ] RESUME
+[ ] ERR, ERL
+[ ] SHELL
+[ ] ENVIRON$
+[ ] COMMAND$
+[x] TIMER (Funktion)
+[x] END
+[x] STOP
+[x] REM, '
+
+OPERATOREN
+----------
+[x] +, -, *, /
+[ ] \ (Integer-Division)
+[ ] ^ (Potenz)
+[x] MOD
+[x] =, <>, <, >, <=, >=
+[x] AND, OR
+[x] NOT
+
+PRIORITAET FUER IMPLEMENTIERUNG
+===============================
+
+Phase 1 - Kontrolfluss:
+  DO...LOOP, EXIT DO/FOR, SELECT CASE, Block-IF
+
+Phase 2 - Strings:
+  TAB, SPC, UCASE$, LCASE$, INSTR, SPACE$, STRING$,
+  LTRIM$, RTRIM$, INPUT$
+
+Phase 3 - Ausgabe:
+  LOCATE, COLOR, PRINT USING
+
+Phase 4 - Subroutinen:
+  SUB/END SUB, FUNCTION/END FUNCTION, CALL
+
+Phase 5 - Numerisch:
+  \, ^, RANDOMIZE, SQR, Trigonometrie
+
+Phase 6 - Sonstiges:
+  SWAP, SLEEP, BEEP, LINE INPUT

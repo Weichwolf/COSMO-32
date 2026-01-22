@@ -1,0 +1,31 @@
+10 REM Test Block IF...THEN...ELSE...END IF
+20 X = 5
+30 IF X > 10 THEN
+40   PRINT "X is greater than 10"
+50 ELSEIF X > 5 THEN
+60   PRINT "X is greater than 5"
+70 ELSEIF X = 5 THEN
+80   PRINT "X equals 5"
+90 ELSE
+100   PRINT "X is less than 5"
+110 END IF
+120 PRINT
+130 REM Nested IF
+140 A = 3
+150 B = 7
+160 IF A > 0 THEN
+170   IF B > 5 THEN
+180     PRINT "A>0 and B>5"
+190   ELSE
+200     PRINT "A>0 but B<=5"
+210   END IF
+220 END IF
+230 PRINT
+240 PRINT "Test EXIT FOR"
+250 FOR I = 1 TO 10
+260   IF I = 5 THEN EXIT FOR
+270   PRINT I;
+280 NEXT I
+290 PRINT
+300 PRINT "Expected: X equals 5, A>0 and B>5, 1 2 3 4"
+310 END

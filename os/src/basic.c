@@ -33,6 +33,8 @@ extern void display_line(int x0, int y0, int x1, int y1, uint8_t color);
 extern void display_circle(int cx, int cy, int r, uint8_t color);
 extern void display_fill_circle(int cx, int cy, int r, uint8_t color);
 extern void display_paint(int x, int y, uint8_t fill_color, uint8_t border_color);
+extern void display_set_cursor(int x, int y);
+extern void display_set_color(uint8_t fg, uint8_t bg);
 
 //----------------------------------------------------------------------
 // Configuration
@@ -97,6 +99,59 @@ static int for_sp = 0;
 static int while_stack[MAX_STACK];
 static int while_sp = 0;
 
+// DO stack
+typedef struct {
+    int return_line;       // Line of DO statement
+    int cond_at_start;     // 1 if WHILE/UNTIL after DO, 0 if at LOOP
+    int is_until;          // 1 if UNTIL, 0 if WHILE
+} DoFrame;
+static DoFrame do_stack[MAX_STACK];
+static int do_sp = 0;
+
+// Block-IF stack
+typedef struct {
+    int branch_taken;      // 1 if a branch (IF/ELSEIF) was already taken
+} IfFrame;
+static IfFrame if_stack[MAX_STACK];
+static int if_sp = 0;
+
+// SELECT CASE stack
+typedef struct {
+    int is_string;
+    int32_t int_val;
+    char str_val[MAX_STRING_LEN];
+    int case_matched;      // 1 if a CASE has already matched
+} SelectFrame;
+static SelectFrame select_stack[MAX_STACK];
+static int select_sp = 0;
+
+// SUB/FUNCTION definitions
+#define MAX_SUBS        32
+#define MAX_SUB_PARAMS  8
+
+typedef struct {
+    char name[MAX_VAR_NAME];
+    int start_line;        // Line index of SUB/FUNCTION statement
+    int is_function;       // 1 if FUNCTION, 0 if SUB
+    int num_params;
+    char params[MAX_SUB_PARAMS][MAX_VAR_NAME];
+    int param_is_string[MAX_SUB_PARAMS];  // 1 if param ends with $
+} SubDef;
+static SubDef subs[MAX_SUBS];
+static int num_subs = 0;
+
+// SUB/FUNCTION call stack
+typedef struct {
+    int return_line;       // Line to return to after END SUB/FUNCTION
+    int sub_idx;           // Index into subs[]
+    int32_t saved_int_vals[MAX_SUB_PARAMS];      // Saved values of param vars
+    char saved_str_vals[MAX_SUB_PARAMS][MAX_STRING_LEN];
+    int32_t func_return_val;       // Return value for FUNCTION (integer)
+    char func_return_str[MAX_STRING_LEN];  // Return value for FUNCTION (string)
+} CallFrame;
+static CallFrame call_stack[MAX_STACK];
+static int call_sp = 0;
+
 // DATA/READ state
 static int data_line = 0;
 static const char *data_ptr = 0;
@@ -108,6 +163,8 @@ static uint32_t rng_state = 12345;
 static int32_t expr(void);
 static void str_expr(char *dest);
 static void execute_line(const char *line);
+static int find_sub(const char *name);
+static int32_t call_sub_or_func(int sub_idx, int return_str, char *str_result);
 
 //----------------------------------------------------------------------
 // Utility functions
@@ -254,6 +311,127 @@ static void error(const char *msg) {
     print_string(msg);
     print_newline();
     running = 0;
+}
+
+//----------------------------------------------------------------------
+// SUB/FUNCTION management
+//----------------------------------------------------------------------
+
+// Find SUB/FUNCTION by name
+static int find_sub(const char *name) {
+    for (int i = 0; i < num_subs; i++) {
+        if (str_equal(subs[i].name, name)) return i;
+    }
+    return -1;
+}
+
+// Scan program for SUB/FUNCTION definitions
+static void scan_subs(void) {
+    num_subs = 0;
+
+    for (int line = 0; line < num_lines; line++) {
+        const char *p = program[line];
+        while (*p == ' ' || *p == '\t') p++;
+
+        int is_func = 0;
+        if (to_upper(p[0]) == 'S' && to_upper(p[1]) == 'U' &&
+            to_upper(p[2]) == 'B' && !is_alpha(p[3])) {
+            p += 3;
+        } else if (to_upper(p[0]) == 'F' && to_upper(p[1]) == 'U' &&
+                   to_upper(p[2]) == 'N' && to_upper(p[3]) == 'C' &&
+                   to_upper(p[4]) == 'T' && to_upper(p[5]) == 'I' &&
+                   to_upper(p[6]) == 'O' && to_upper(p[7]) == 'N' && !is_alpha(p[8])) {
+            p += 8;
+            is_func = 1;
+        } else {
+            continue;
+        }
+
+        if (num_subs >= MAX_SUBS) continue;
+
+        while (*p == ' ' || *p == '\t') p++;
+
+        // Parse name
+        SubDef *s = &subs[num_subs];
+        int ni = 0;
+        while ((is_alpha(*p) || is_digit(*p)) && ni < MAX_VAR_NAME - 1) {
+            s->name[ni++] = to_upper(*p++);
+        }
+        s->name[ni] = '\0';
+        s->start_line = line;
+        s->is_function = is_func;
+        s->num_params = 0;
+
+        // Skip optional $ for function name
+        if (*p == '$') p++;
+
+        while (*p == ' ' || *p == '\t') p++;
+
+        // Parse parameters
+        if (*p == '(') {
+            p++;
+            while (*p && *p != ')' && s->num_params < MAX_SUB_PARAMS) {
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == ')') break;
+
+                // Parse param name
+                int pi = 0;
+                while ((is_alpha(*p) || is_digit(*p)) && pi < MAX_VAR_NAME - 1) {
+                    s->params[s->num_params][pi++] = to_upper(*p++);
+                }
+                s->params[s->num_params][pi] = '\0';
+                s->param_is_string[s->num_params] = 0;
+                if (*p == '$') { s->param_is_string[s->num_params] = 1; p++; }
+                s->num_params++;
+
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == ',') p++;
+            }
+        }
+
+        num_subs++;
+    }
+}
+
+// Skip to matching END SUB or END FUNCTION
+static void skip_to_end_sub(int is_func) {
+    int depth = 1;
+    while (depth > 0 && current_line < num_lines - 1) {
+        current_line++;
+        const char *p = program[current_line];
+        while (*p) {
+            while (*p == ' ' || *p == '\t') p++;
+
+            // Check for nested SUB/FUNCTION
+            if ((to_upper(p[0]) == 'S' && to_upper(p[1]) == 'U' &&
+                 to_upper(p[2]) == 'B' && !is_alpha(p[3])) ||
+                (to_upper(p[0]) == 'F' && to_upper(p[1]) == 'U' &&
+                 to_upper(p[2]) == 'N' && to_upper(p[3]) == 'C' &&
+                 to_upper(p[4]) == 'T' && to_upper(p[5]) == 'I' &&
+                 to_upper(p[6]) == 'O' && to_upper(p[7]) == 'N' && !is_alpha(p[8]))) {
+                depth++;
+            }
+            // Check for END SUB / END FUNCTION
+            else if (to_upper(p[0]) == 'E' && to_upper(p[1]) == 'N' &&
+                     to_upper(p[2]) == 'D' && (p[3] == ' ' || p[3] == '\t')) {
+                const char *q = p + 4;
+                while (*q == ' ' || *q == '\t') q++;
+                if (to_upper(q[0]) == 'S' && to_upper(q[1]) == 'U' &&
+                    to_upper(q[2]) == 'B' && !is_alpha(q[3])) {
+                    depth--;
+                } else if (to_upper(q[0]) == 'F' && to_upper(q[1]) == 'U' &&
+                           to_upper(q[2]) == 'N' && to_upper(q[3]) == 'C' &&
+                           to_upper(q[4]) == 'T' && to_upper(q[5]) == 'I' &&
+                           to_upper(q[6]) == 'O' && to_upper(q[7]) == 'N' && !is_alpha(q[8])) {
+                    depth--;
+                }
+                if (depth == 0) return;
+            }
+
+            while (*p && *p != ':') p++;
+            if (*p == ':') p++;
+        }
+    }
 }
 
 //----------------------------------------------------------------------
@@ -413,6 +591,139 @@ static void str_factor(char *dest) {
         return;
     }
 
+    // UCASE$(s$)
+    if (match_keyword("UCASE$")) {
+        if (*ptr == '(') ptr++;
+        char tmp[MAX_STRING_LEN];
+        str_expr(tmp);
+        if (*ptr == ')') ptr++;
+        for (int i = 0; tmp[i]; i++)
+            dest[i] = (tmp[i] >= 'a' && tmp[i] <= 'z') ? tmp[i] - 32 : tmp[i];
+        dest[str_len(tmp)] = '\0';
+        return;
+    }
+
+    // LCASE$(s$)
+    if (match_keyword("LCASE$")) {
+        if (*ptr == '(') ptr++;
+        char tmp[MAX_STRING_LEN];
+        str_expr(tmp);
+        if (*ptr == ')') ptr++;
+        for (int i = 0; tmp[i]; i++)
+            dest[i] = (tmp[i] >= 'A' && tmp[i] <= 'Z') ? tmp[i] + 32 : tmp[i];
+        dest[str_len(tmp)] = '\0';
+        return;
+    }
+
+    // LTRIM$(s$)
+    if (match_keyword("LTRIM$")) {
+        if (*ptr == '(') ptr++;
+        char tmp[MAX_STRING_LEN];
+        str_expr(tmp);
+        if (*ptr == ')') ptr++;
+        int i = 0;
+        while (tmp[i] == ' ' || tmp[i] == '\t') i++;
+        str_copy(dest, tmp + i, MAX_STRING_LEN);
+        return;
+    }
+
+    // RTRIM$(s$)
+    if (match_keyword("RTRIM$")) {
+        if (*ptr == '(') ptr++;
+        char tmp[MAX_STRING_LEN];
+        str_expr(tmp);
+        if (*ptr == ')') ptr++;
+        str_copy(dest, tmp, MAX_STRING_LEN);
+        int len = str_len(dest);
+        while (len > 0 && (dest[len-1] == ' ' || dest[len-1] == '\t')) len--;
+        dest[len] = '\0';
+        return;
+    }
+
+    // SPACE$(n)
+    if (match_keyword("SPACE$")) {
+        if (*ptr == '(') ptr++;
+        int32_t n = expr();
+        if (*ptr == ')') ptr++;
+        if (n < 0) n = 0;
+        if (n > MAX_STRING_LEN - 1) n = MAX_STRING_LEN - 1;
+        for (int i = 0; i < n; i++) dest[i] = ' ';
+        dest[n] = '\0';
+        return;
+    }
+
+    // STRING$(n, char) or STRING$(n, char$)
+    if (match_keyword("STRING$")) {
+        if (*ptr == '(') ptr++;
+        int32_t n = expr();
+        skip_spaces();
+        if (*ptr == ',') ptr++;
+        skip_spaces();
+        char c;
+        if (*ptr == '"') {
+            char tmp[MAX_STRING_LEN];
+            str_expr(tmp);
+            c = tmp[0] ? tmp[0] : ' ';
+        } else {
+            c = (char)expr();
+        }
+        if (*ptr == ')') ptr++;
+        if (n < 0) n = 0;
+        if (n > MAX_STRING_LEN - 1) n = MAX_STRING_LEN - 1;
+        for (int i = 0; i < n; i++) dest[i] = c;
+        dest[n] = '\0';
+        return;
+    }
+
+    // HEX$(n)
+    if (match_keyword("HEX$")) {
+        if (*ptr == '(') ptr++;
+        uint32_t n = (uint32_t)expr();
+        if (*ptr == ')') ptr++;
+        if (n == 0) { dest[0] = '0'; dest[1] = '\0'; return; }
+        char buf[12];
+        int i = 0;
+        while (n > 0) {
+            int d = n & 0xF;
+            buf[i++] = d < 10 ? '0' + d : 'A' + d - 10;
+            n >>= 4;
+        }
+        int j = 0;
+        while (i > 0) dest[j++] = buf[--i];
+        dest[j] = '\0';
+        return;
+    }
+
+    // OCT$(n)
+    if (match_keyword("OCT$")) {
+        if (*ptr == '(') ptr++;
+        uint32_t n = (uint32_t)expr();
+        if (*ptr == ')') ptr++;
+        if (n == 0) { dest[0] = '0'; dest[1] = '\0'; return; }
+        char buf[16];
+        int i = 0;
+        while (n > 0) { buf[i++] = '0' + (n & 7); n >>= 3; }
+        int j = 0;
+        while (i > 0) dest[j++] = buf[--i];
+        dest[j] = '\0';
+        return;
+    }
+
+    // INPUT$(n)
+    if (match_keyword("INPUT$")) {
+        if (*ptr == '(') ptr++;
+        int32_t n = expr();
+        if (*ptr == ')') ptr++;
+        if (n < 0) n = 0;
+        if (n > MAX_STRING_LEN - 1) n = MAX_STRING_LEN - 1;
+        for (int i = 0; i < n; i++) {
+            int c = getchar();
+            dest[i] = (char)c;
+        }
+        dest[n] = '\0';
+        return;
+    }
+
     // String variable (NAME$) or array (NAME$(n))
     if (is_alpha(*ptr)) {
         const char *save = ptr;
@@ -555,11 +866,60 @@ static int32_t factor(void) {
         return tmp[0] ? (unsigned char)tmp[0] : 0;
     }
 
+    // INSTR([start,] string$, search$)
+    if (match_keyword("INSTR")) {
+        if (*ptr == '(') ptr++;
+        skip_spaces();
+        int32_t start = 1;
+        char haystack[MAX_STRING_LEN];
+        char needle[MAX_STRING_LEN];
+
+        // Check if first arg is numeric (start position)
+        if (is_digit(*ptr) || (*ptr == '-' && is_digit(ptr[1]))) {
+            start = expr();
+            skip_spaces();
+            if (*ptr == ',') ptr++;
+            skip_spaces();
+        } else if (is_alpha(*ptr)) {
+            // Could be variable or string - check if followed by $ or (
+            const char *q = ptr;
+            while (is_alpha(*q) || is_digit(*q)) q++;
+            if (*q != '$' && *q != '(') {
+                // It's a numeric variable (start position)
+                start = expr();
+                skip_spaces();
+                if (*ptr == ',') ptr++;
+                skip_spaces();
+            }
+        }
+
+        str_expr(haystack);
+        skip_spaces();
+        if (*ptr == ',') ptr++;
+        str_expr(needle);
+        if (*ptr == ')') ptr++;
+
+        if (start < 1) start = 1;
+        int hlen = str_len(haystack);
+        int nlen = str_len(needle);
+        if (nlen == 0) return start;
+        if (start > hlen) return 0;
+
+        for (int i = start - 1; i <= hlen - nlen; i++) {
+            int match = 1;
+            for (int j = 0; j < nlen; j++) {
+                if (haystack[i + j] != needle[j]) { match = 0; break; }
+            }
+            if (match) return i + 1;  // 1-based
+        }
+        return 0;
+    }
+
     if (match_keyword("TIMER")) {
         return (int32_t)get_timer_ms();
     }
 
-    // Variable (NAME or NAME(n))
+    // Variable (NAME or NAME(n)) or FUNCTION call
     if (is_alpha(*ptr)) {
         char name[MAX_VAR_NAME];
         int is_str = parse_var_name(name);
@@ -567,12 +927,19 @@ static int32_t factor(void) {
         // String variable in numeric context = 0
         if (is_str) return 0;
 
-        int idx = get_or_create_var(name, 0);
-        if (idx < 0) { error("TOO MANY VARS"); return 0; }
-
         skip_spaces();
+
+        // Check if it's a FUNCTION call
         if (*ptr == '(') {
+            int sub_idx = find_sub(name);
+            if (sub_idx >= 0 && subs[sub_idx].is_function) {
+                // It's a FUNCTION call
+                return call_sub_or_func(sub_idx, 0, 0);
+            }
+
             // Array access
+            int idx = get_or_create_var(name, 0);
+            if (idx < 0) { error("TOO MANY VARS"); return 0; }
             ptr++;
             int32_t index = expr();
             if (*ptr == ')') ptr++;
@@ -584,6 +951,9 @@ static int32_t factor(void) {
                 return 0;
             }
         }
+
+        int idx = get_or_create_var(name, 0);
+        if (idx < 0) { error("TOO MANY VARS"); return 0; }
         return variables[idx].int_val;
     }
 
@@ -643,8 +1013,14 @@ static int32_t expr(void) {
     int32_t result = comp_expr();
     while (1) {
         skip_spaces();
-        if (match_keyword("AND")) { result = result && comp_expr(); }
-        else if (match_keyword("OR")) { result = result || comp_expr(); }
+        if (match_keyword("AND")) {
+            int32_t right = comp_expr();
+            result = result && right;
+        }
+        else if (match_keyword("OR")) {
+            int32_t right = comp_expr();
+            result = result || right;
+        }
         else break;
     }
     return result;
@@ -739,15 +1115,7 @@ static int is_string_expr(void) {
     // String literal
     if (*p == '"') return 1;
 
-    // String functions: CHR$, STR$, LEFT$, RIGHT$, MID$, INKEY$
-    if (to_upper(p[0]) == 'C' && to_upper(p[1]) == 'H' && to_upper(p[2]) == 'R' && p[3] == '$') return 1;
-    if (to_upper(p[0]) == 'S' && to_upper(p[1]) == 'T' && to_upper(p[2]) == 'R' && p[3] == '$') return 1;
-    if (to_upper(p[0]) == 'L' && to_upper(p[1]) == 'E' && to_upper(p[2]) == 'F' && to_upper(p[3]) == 'T' && p[4] == '$') return 1;
-    if (to_upper(p[0]) == 'R' && to_upper(p[1]) == 'I' && to_upper(p[2]) == 'G' && to_upper(p[3]) == 'H' && to_upper(p[4]) == 'T' && p[5] == '$') return 1;
-    if (to_upper(p[0]) == 'M' && to_upper(p[1]) == 'I' && to_upper(p[2]) == 'D' && p[3] == '$') return 1;
-    if (to_upper(p[0]) == 'I' && to_upper(p[1]) == 'N' && to_upper(p[2]) == 'K' && to_upper(p[3]) == 'E' && to_upper(p[4]) == 'Y' && p[5] == '$') return 1;
-
-    // String variable: NAME$ - scan alphanumeric then check for $
+    // String functions or variables ending with $
     if (is_alpha(*p)) {
         while (is_alpha(*p) || is_digit(*p)) p++;
         if (*p == '$') return 1;
@@ -756,8 +1124,89 @@ static int is_string_expr(void) {
     return 0;
 }
 
+static int print_col = 0;  // Track column position for TAB
+
+static void print_char_track(char c) {
+    putchar(c);
+    if (c == '\n') print_col = 0;
+    else if (c == '\t') print_col = (print_col + 8) & ~7;
+    else print_col++;
+}
+
+// PRINT USING helper: format integer with width
+static void print_using_int(const char *fmt, int fmtlen, int32_t val) {
+    // Count # characters for width
+    int width = 0;
+    for (int i = 0; i < fmtlen; i++) {
+        if (fmt[i] == '#') width++;
+    }
+    if (width == 0) width = 1;
+
+    // Convert number to string
+    char buf[16];
+    int len = 0, neg = 0;
+    if (val < 0) { neg = 1; val = -val; }
+    if (val == 0) buf[len++] = '0';
+    else while (val > 0) { buf[len++] = '0' + (val % 10); val /= 10; }
+
+    // Print with padding
+    int total = len + (neg ? 1 : 0);
+    for (int i = 0; i < width - total; i++) print_char_track(' ');
+    if (neg) print_char_track('-');
+    while (len > 0) print_char_track(buf[--len]);
+}
+
+// PRINT USING helper: format string with width
+static void print_using_str(int width, const char *val) {
+    int vlen = str_len(val);
+    for (int i = 0; i < width && i < vlen; i++) print_char_track(val[i]);
+    for (int i = vlen; i < width; i++) print_char_track(' ');
+}
+
 static void stmt_print(void) {
     skip_spaces();
+
+    // Check for PRINT USING
+    if (match_keyword("USING")) {
+        skip_spaces();
+        char fmt[MAX_STRING_LEN];
+        str_expr(fmt);
+        skip_spaces();
+        if (*ptr == ';') ptr++;
+
+        // Process format string and values
+        const char *f = fmt;
+        while (*f && *ptr && *ptr != ':') {
+            skip_spaces();
+            if (*f == '#' || *f == '+' || *f == '-' || *f == '$') {
+                // Numeric format - collect format specifier
+                const char *start = f;
+                while (*f == '#' || *f == '.' || *f == ',' || *f == '+' || *f == '-' || *f == '$') f++;
+                int fmtlen = f - start;
+                int32_t val = expr();
+                print_using_int(start, fmtlen, val);
+                skip_spaces();
+                if (*ptr == ',' || *ptr == ';') ptr++;
+            } else if (*f == '\\') {
+                // String format: \   \ (width = spaces + 2)
+                f++;  // Skip first backslash
+                int width = 2;
+                while (*f && *f != '\\') { f++; width++; }
+                if (*f == '\\') f++;
+                char val[MAX_STRING_LEN];
+                str_expr(val);
+                print_using_str(width, val);
+                skip_spaces();
+                if (*ptr == ',' || *ptr == ';') ptr++;
+            } else {
+                // Literal character in format
+                print_char_track(*f++);
+            }
+        }
+        print_char_track('\n');
+        return;
+    }
+
     int need_newline = 1;
 
     while (*ptr && *ptr != ':') {
@@ -767,13 +1216,30 @@ static void stmt_print(void) {
             need_newline = 0;
             ptr++;
         } else if (*ptr == ',') {
-            print_char('\t');
+            print_char_track('\t');
             need_newline = 1;
             ptr++;
+        } else if (match_keyword("TAB")) {
+            // TAB(n) - move to column n
+            if (*ptr == '(') ptr++;
+            int32_t col = expr();
+            if (*ptr == ')') ptr++;
+            if (col < 1) col = 1;
+            if (col > 80) col = 80;
+            while (print_col < col - 1) print_char_track(' ');
+            need_newline = 0;
+        } else if (match_keyword("SPC")) {
+            // SPC(n) - print n spaces
+            if (*ptr == '(') ptr++;
+            int32_t n = expr();
+            if (*ptr == ')') ptr++;
+            if (n < 0) n = 0;
+            for (int i = 0; i < n; i++) print_char_track(' ');
+            need_newline = 0;
         } else if (*ptr == '"') {
             // String literal
             ptr++;
-            while (*ptr && *ptr != '"') print_char(*ptr++);
+            while (*ptr && *ptr != '"') print_char_track(*ptr++);
             if (*ptr == '"') ptr++;
             need_newline = 1;
         } else if (*ptr && *ptr != ':') {
@@ -781,15 +1247,23 @@ static void stmt_print(void) {
             if (is_string_expr()) {
                 char tmp[MAX_STRING_LEN];
                 str_expr(tmp);
-                print_string(tmp);
+                for (int i = 0; tmp[i]; i++) print_char_track(tmp[i]);
             } else {
-                print_int(expr());
+                // Print integer
+                int32_t n = expr();
+                char buf[12];
+                int i = 0, neg = 0;
+                if (n < 0) { neg = 1; n = -n; }
+                if (n == 0) buf[i++] = '0';
+                else while (n > 0) { buf[i++] = '0' + (n % 10); n /= 10; }
+                if (neg) print_char_track('-');
+                while (i > 0) print_char_track(buf[--i]);
             }
             need_newline = 1;
         }
     }
 
-    if (need_newline) print_newline();
+    if (need_newline) { print_char_track('\n'); }
 }
 
 static void stmt_input(void) {
@@ -878,10 +1352,7 @@ static void stmt_let(void) {
     char name[MAX_VAR_NAME];
     int is_string = parse_var_name(name);
 
-    int idx = get_or_create_var(name, is_string);
-    if (idx < 0) { error("TOO MANY VARS"); return; }
-
-    // Check for array
+    // Check for array access or FUNCTION call (but we need the = sign)
     int is_array_access = 0;
     int32_t index = 0;
     skip_spaces();
@@ -894,6 +1365,24 @@ static void stmt_let(void) {
 
     skip_spaces();
     if (*ptr == '=') ptr++;
+
+    // Check if this is a FUNCTION return value assignment
+    if (call_sp > 0 && !is_array_access) {
+        CallFrame *f = &call_stack[call_sp - 1];
+        SubDef *s = &subs[f->sub_idx];
+        if (s->is_function && str_equal(name, s->name)) {
+            // Assigning to FUNCTION name = setting return value
+            if (is_string) {
+                str_expr(f->func_return_str);
+            } else {
+                f->func_return_val = expr();
+            }
+            return;
+        }
+    }
+
+    int idx = get_or_create_var(name, is_string);
+    if (idx < 0) { error("TOO MANY VARS"); return; }
 
     Variable *v = &variables[idx];
 
@@ -1071,6 +1560,118 @@ static void stmt_wend(void) {
     current_line = while_stack[--while_sp] - 1;  // Go back to WHILE line
 }
 
+// Skip to matching LOOP
+static void skip_to_loop(void) {
+    int depth = 1;
+    while (depth > 0 && current_line < num_lines - 1) {
+        current_line++;
+        const char *p = program[current_line];
+        while (*p) {
+            while (*p == ' ' || *p == '\t') p++;
+            if (to_upper(p[0]) == 'D' && to_upper(p[1]) == 'O' && !is_alpha(p[2])) {
+                depth++;
+            } else if (to_upper(p[0]) == 'L' && to_upper(p[1]) == 'O' &&
+                       to_upper(p[2]) == 'O' && to_upper(p[3]) == 'P' && !is_alpha(p[4])) {
+                depth--;
+                if (depth == 0) return;
+            }
+            while (*p && *p != ':') p++;
+            if (*p == ':') p++;
+        }
+    }
+}
+
+static void stmt_do(void) {
+    if (do_sp >= MAX_STACK) { error("DO OVERFLOW"); return; }
+
+    skip_spaces();
+    int cond_at_start = 0;
+    int is_until = 0;
+    int32_t cond = 1;
+
+    if (match_keyword("WHILE")) {
+        cond_at_start = 1;
+        is_until = 0;
+        cond = expr();
+    } else if (match_keyword("UNTIL")) {
+        cond_at_start = 1;
+        is_until = 1;
+        cond = !expr();
+    }
+
+    do_stack[do_sp].return_line = current_line;
+    do_stack[do_sp].cond_at_start = cond_at_start;
+    do_stack[do_sp].is_until = is_until;
+    do_sp++;
+
+    if (cond_at_start && !cond) {
+        do_sp--;
+        skip_to_loop();
+    }
+}
+
+static void stmt_loop(void) {
+    if (do_sp <= 0) { error("LOOP WITHOUT DO"); return; }
+
+    DoFrame *f = &do_stack[do_sp - 1];
+    int return_line = f->return_line;
+    skip_spaces();
+
+    if (f->cond_at_start) {
+        // Condition was at DO, pop and loop back (DO will push again if cond true)
+        do_sp--;
+        current_line = return_line - 1;
+    } else {
+        // Check condition at LOOP
+        int32_t cond = 1;
+        if (match_keyword("WHILE")) {
+            cond = expr();
+        } else if (match_keyword("UNTIL")) {
+            cond = !expr();
+        }
+
+        // Always pop - DO will push again if we loop back
+        do_sp--;
+        if (cond) {
+            current_line = return_line - 1;
+        }
+    }
+}
+
+static void stmt_exit_do(void) {
+    if (do_sp <= 0) { error("EXIT DO WITHOUT DO"); return; }
+    do_sp--;
+    skip_to_loop();
+}
+
+// Skip to matching NEXT
+static void skip_to_next(void) {
+    int depth = 1;
+    while (depth > 0 && current_line < num_lines - 1) {
+        current_line++;
+        const char *p = program[current_line];
+        while (*p) {
+            while (*p == ' ' || *p == '\t') p++;
+            if (to_upper(p[0]) == 'F' && to_upper(p[1]) == 'O' &&
+                to_upper(p[2]) == 'R' && !is_alpha(p[3])) {
+                depth++;
+            } else if (to_upper(p[0]) == 'N' && to_upper(p[1]) == 'E' &&
+                       to_upper(p[2]) == 'X' && to_upper(p[3]) == 'T' && !is_alpha(p[4])) {
+                depth--;
+                if (depth == 0) return;
+            }
+            while (*p && *p != ':') p++;
+            if (*p == ':') p++;
+        }
+    }
+}
+
+static void stmt_exit_for(void) {
+    if (for_sp <= 0) { error("EXIT FOR WITHOUT FOR"); return; }
+    for_sp--;
+    skip_to_next();
+}
+
 static void stmt_on(void) {
     int32_t n = expr();
     skip_spaces();
@@ -1160,6 +1761,202 @@ static void stmt_restore(void) {
 }
 
 //----------------------------------------------------------------------
+// SUB/FUNCTION statements
+//----------------------------------------------------------------------
+
+// DECLARE SUB/FUNCTION - just skip (definitions scanned at RUN)
+static void stmt_declare(void) {
+    while (*ptr && *ptr != ':') ptr++;
+}
+
+// SUB name(params) - skip to END SUB (body executed via CALL)
+static void stmt_sub_def(void) {
+    skip_to_end_sub(0);
+}
+
+// FUNCTION name(params) - skip to END FUNCTION
+static void stmt_func_def(void) {
+    skip_to_end_sub(1);
+}
+
+// END SUB - return from subroutine
+static void stmt_end_sub(void) {
+    if (call_sp <= 0) { error("END SUB WITHOUT CALL"); return; }
+    call_sp--;
+    CallFrame *f = &call_stack[call_sp];
+
+    // Restore parameter variables
+    SubDef *s = &subs[f->sub_idx];
+    for (int i = 0; i < s->num_params; i++) {
+        int idx = find_var(s->params[i], s->param_is_string[i]);
+        if (idx >= 0) {
+            if (s->param_is_string[i]) {
+                str_copy(variables[idx].str_val, f->saved_str_vals[i], MAX_STRING_LEN);
+            } else {
+                variables[idx].int_val = f->saved_int_vals[i];
+            }
+        }
+    }
+
+    current_line = f->return_line;
+}
+
+// END FUNCTION - return from function
+static void stmt_end_func(void) {
+    if (call_sp <= 0) { error("END FUNCTION WITHOUT CALL"); return; }
+    call_sp--;
+    CallFrame *f = &call_stack[call_sp];
+
+    // Restore parameter variables
+    SubDef *s = &subs[f->sub_idx];
+    for (int i = 0; i < s->num_params; i++) {
+        int idx = find_var(s->params[i], s->param_is_string[i]);
+        if (idx >= 0) {
+            if (s->param_is_string[i]) {
+                str_copy(variables[idx].str_val, f->saved_str_vals[i], MAX_STRING_LEN);
+            } else {
+                variables[idx].int_val = f->saved_int_vals[i];
+            }
+        }
+    }
+
+    current_line = f->return_line;
+}
+
+// Helper: call a SUB or FUNCTION
+static int32_t call_sub_or_func(int sub_idx, int return_str, char *str_result) {
+    SubDef *s = &subs[sub_idx];
+
+    if (call_sp >= MAX_STACK) { error("CALL OVERFLOW"); return 0; }
+
+    CallFrame *f = &call_stack[call_sp];
+    f->return_line = current_line;
+    f->sub_idx = sub_idx;
+    f->func_return_val = 0;
+    f->func_return_str[0] = '\0';
+
+    // Save current values of parameter variables and set new values
+    skip_spaces();
+    if (*ptr == '(') ptr++;
+
+    for (int i = 0; i < s->num_params; i++) {
+        int idx = get_or_create_var(s->params[i], s->param_is_string[i]);
+        if (idx >= 0) {
+            // Save old value
+            if (s->param_is_string[i]) {
+                str_copy(f->saved_str_vals[i], variables[idx].str_val, MAX_STRING_LEN);
+            } else {
+                f->saved_int_vals[i] = variables[idx].int_val;
+            }
+
+            // Set new value from argument
+            skip_spaces();
+            if (s->param_is_string[i]) {
+                char tmp[MAX_STRING_LEN];
+                str_expr(tmp);
+                str_copy(variables[idx].str_val, tmp, MAX_STRING_LEN);
+            } else {
+                variables[idx].int_val = expr();
+            }
+        }
+        skip_spaces();
+        if (*ptr == ',') ptr++;
+    }
+
+    skip_spaces();
+    if (*ptr == ')') ptr++;
+
+    call_sp++;
+
+    // Save control flow stack states for nested calls
+    int saved_if_sp = if_sp;
+    int saved_for_sp = for_sp;
+    int saved_while_sp = while_sp;
+    int saved_do_sp = do_sp;
+    int saved_select_sp = select_sp;
+
+    // Execute the SUB/FUNCTION body
+    int saved_line = current_line;
+    current_line = s->start_line + 1;  // First line after SUB/FUNCTION
+
+    while (running && current_line < num_lines) {
+        const char *p = program[current_line];
+        while (*p == ' ' || *p == '\t') p++;
+
+        // Check for END SUB / END FUNCTION
+        if (to_upper(p[0]) == 'E' && to_upper(p[1]) == 'N' &&
+            to_upper(p[2]) == 'D' && (p[3] == ' ' || p[3] == '\t')) {
+            const char *q = p + 4;
+            while (*q == ' ' || *q == '\t') q++;
+            if ((to_upper(q[0]) == 'S' && to_upper(q[1]) == 'U' &&
+                 to_upper(q[2]) == 'B' && !is_alpha(q[3])) ||
+                (to_upper(q[0]) == 'F' && to_upper(q[1]) == 'U' &&
+                 to_upper(q[2]) == 'N' && to_upper(q[3]) == 'C' &&
+                 to_upper(q[4]) == 'T' && to_upper(q[5]) == 'I' &&
+                 to_upper(q[6]) == 'O' && to_upper(q[7]) == 'N' && !is_alpha(q[8]))) {
+                // End of this SUB/FUNCTION
+                break;
+            }
+        }
+
+        execute_line(program[current_line]);
+        current_line++;
+    }
+
+    // Get return value (for FUNCTION)
+    int32_t ret_val = 0;
+    if (s->is_function && call_sp > 0) {
+        f = &call_stack[call_sp - 1];
+        ret_val = f->func_return_val;
+        if (return_str && str_result) {
+            str_copy(str_result, f->func_return_str, MAX_STRING_LEN);
+        }
+    }
+
+    // Pop call frame and restore parameters
+    if (call_sp > 0) {
+        call_sp--;
+        f = &call_stack[call_sp];
+        for (int i = 0; i < s->num_params; i++) {
+            int idx = find_var(s->params[i], s->param_is_string[i]);
+            if (idx >= 0) {
+                if (s->param_is_string[i]) {
+                    str_copy(variables[idx].str_val, f->saved_str_vals[i], MAX_STRING_LEN);
+                } else {
+                    variables[idx].int_val = f->saved_int_vals[i];
+                }
+            }
+        }
+    }
+
+    // Restore control flow stack states
+    if_sp = saved_if_sp;
+    for_sp = saved_for_sp;
+    while_sp = saved_while_sp;
+    do_sp = saved_do_sp;
+    select_sp = saved_select_sp;
+
+    current_line = saved_line;
+    return ret_val;
+}
+
+// CALL name(args)
+static void stmt_call(void) {
+    skip_spaces();
+    char name[MAX_VAR_NAME];
+    int ni = 0;
+    while ((is_alpha(*ptr) || is_digit(*ptr)) && ni < MAX_VAR_NAME - 1) {
+        name[ni++] = to_upper(*ptr++);
+    }
+    name[ni] = '\0';
+
+    int sub_idx = find_sub(name);
+    if (sub_idx < 0) { error("SUB NOT FOUND"); return; }
+
+    call_sub_or_func(sub_idx, 0, 0);
+}
+
+//----------------------------------------------------------------------
 // Graphics statements
 //----------------------------------------------------------------------
 
@@ -1238,36 +2035,313 @@ static void stmt_paint(void) {
     display_paint(x, y, (uint8_t)fill, (uint8_t)border);
 }
 
+// LOCATE row, col (1-based)
+static void stmt_locate(void) {
+    skip_spaces();
+    int32_t row = expr();
+    skip_spaces();
+    if (*ptr == ',') ptr++;
+    int32_t col = expr();
+    display_set_cursor(col - 1, row - 1);
+    print_col = col - 1;  // Sync PRINT column tracker
+}
+
+// COLOR fg [, bg]
+static void stmt_color(void) {
+    skip_spaces();
+    int32_t fg = expr();
+    int32_t bg = 0;  // Default: black background
+    skip_spaces();
+    if (*ptr == ',') {
+        ptr++;
+        bg = expr();
+    }
+    display_set_color((uint8_t)fg, (uint8_t)bg);
+}
+
+// Check if at end of statement (for block IF detection)
+static int is_end_of_stmt(void) {
+    const char *p = ptr;
+    while (*p == ' ' || *p == '\t') p++;
+    return *p == '\0' || *p == ':' || *p == '\'';
+}
+
+// Skip to matching ELSEIF, ELSE, or END IF at current nesting level
+// mode: 0 = stop at ELSEIF/ELSE/ENDIF, 1 = stop only at ENDIF
+static void skip_to_else_or_endif(int mode) {
+    int depth = 1;
+    while (depth > 0 && current_line < num_lines - 1) {
+        current_line++;
+        const char *p = program[current_line];
+        while (*p) {
+            while (*p == ' ' || *p == '\t') p++;
+
+            // Check for IF (start of block - need to check for THEN at end)
+            if (to_upper(p[0]) == 'I' && to_upper(p[1]) == 'F' && !is_alpha(p[2])) {
+                // Scan to see if this is a block IF (THEN at end of line)
+                const char *q = p + 2;
+                while (*q && *q != '\'' && *q != ':') {
+                    if (to_upper(q[0]) == 'T' && to_upper(q[1]) == 'H' &&
+                        to_upper(q[2]) == 'E' && to_upper(q[3]) == 'N' && !is_alpha(q[4])) {
+                        q += 4;
+                        while (*q == ' ' || *q == '\t') q++;
+                        if (*q == '\0' || *q == '\'' || *q == ':') {
+                            depth++;  // Block IF
+                        }
+                        break;
+                    }
+                    q++;
+                }
+            }
+            // Check for END IF
+            else if (to_upper(p[0]) == 'E' && to_upper(p[1]) == 'N' && to_upper(p[2]) == 'D' &&
+                     (p[3] == ' ' || p[3] == '\t')) {
+                const char *q = p + 4;
+                while (*q == ' ' || *q == '\t') q++;
+                if (to_upper(q[0]) == 'I' && to_upper(q[1]) == 'F' && !is_alpha(q[2])) {
+                    depth--;
+                    if (depth == 0) return;
+                }
+            }
+            // Check for ELSEIF (only at depth 1, mode 0)
+            else if (depth == 1 && mode == 0 &&
+                     to_upper(p[0]) == 'E' && to_upper(p[1]) == 'L' &&
+                     to_upper(p[2]) == 'S' && to_upper(p[3]) == 'E' &&
+                     to_upper(p[4]) == 'I' && to_upper(p[5]) == 'F' && !is_alpha(p[6])) {
+                current_line--;  // Back up so execute_line processes ELSEIF
+                return;
+            }
+            // Check for ELSE (only at depth 1, mode 0)
+            else if (depth == 1 && mode == 0 &&
+                     to_upper(p[0]) == 'E' && to_upper(p[1]) == 'L' &&
+                     to_upper(p[2]) == 'S' && to_upper(p[3]) == 'E' && !is_alpha(p[4])) {
+                current_line--;  // Back up so execute_line processes ELSE
+                return;
+            }
+
+            while (*p && *p != ':') p++;
+            if (*p == ':') p++;
+        }
+    }
+}
+
 static void stmt_if(void) {
     int32_t cond = expr();
     skip_spaces();
 
     if (!match_keyword("THEN")) { error("EXPECTED THEN"); return; }
 
-    if (cond) {
-        skip_spaces();
-        if (is_digit(*ptr)) {
-            int linenum = parse_number();
-            int idx = find_line(linenum);
-            if (idx >= 0) current_line = idx - 1;
-        } else {
-            execute_line(ptr);
+    skip_spaces();
+    if (is_end_of_stmt()) {
+        // Block IF
+        if (if_sp >= MAX_STACK) { error("IF OVERFLOW"); return; }
+        if_stack[if_sp].branch_taken = cond ? 1 : 0;
+        if_sp++;
+
+        if (!cond) {
+            skip_to_else_or_endif(0);
         }
     } else {
-        // Skip to ELSE if present, or end of statement
-        while (*ptr) {
-            if (to_upper(ptr[0]) == 'E' && to_upper(ptr[1]) == 'L' &&
-                to_upper(ptr[2]) == 'S' && to_upper(ptr[3]) == 'E' &&
-                !is_alpha(ptr[4])) {
-                ptr += 4;
-                skip_spaces();
+        // Single-line IF
+        if (cond) {
+            if (is_digit(*ptr)) {
+                int linenum = parse_number();
+                int idx = find_line(linenum);
+                if (idx >= 0) current_line = idx - 1;
+            } else {
                 execute_line(ptr);
-                break;
             }
-            ptr++;
+        } else {
+            // Skip to ELSE if present
+            while (*ptr) {
+                if (to_upper(ptr[0]) == 'E' && to_upper(ptr[1]) == 'L' &&
+                    to_upper(ptr[2]) == 'S' && to_upper(ptr[3]) == 'E' &&
+                    !is_alpha(ptr[4])) {
+                    ptr += 4;
+                    skip_spaces();
+                    execute_line(ptr);
+                    break;
+                }
+                ptr++;
+            }
+        }
+        while (*ptr && *ptr != ':') ptr++;
+    }
+}
+
+static void stmt_elseif(void) {
+    if (if_sp <= 0) { error("ELSEIF WITHOUT IF"); return; }
+
+    IfFrame *f = &if_stack[if_sp - 1];
+    if (f->branch_taken) {
+        // Already took a branch, skip to END IF
+        skip_to_else_or_endif(1);
+        return;
+    }
+
+    int32_t cond = expr();
+    skip_spaces();
+    if (!match_keyword("THEN")) { error("EXPECTED THEN"); return; }
+
+    if (cond) {
+        f->branch_taken = 1;
+    } else {
+        skip_to_else_or_endif(0);
+    }
+}
+
+static void stmt_else(void) {
+    if (if_sp <= 0) { error("ELSE WITHOUT IF"); return; }
+
+    IfFrame *f = &if_stack[if_sp - 1];
+    if (f->branch_taken) {
+        // Already took a branch, skip to END IF
+        skip_to_else_or_endif(1);
+    }
+    // Otherwise just continue executing
+}
+
+static void stmt_endif(void) {
+    if (if_sp <= 0) { error("END IF WITHOUT IF"); return; }
+    if_sp--;
+}
+
+// Skip to matching CASE, CASE ELSE, or END SELECT
+// mode: 0 = stop at any, 1 = stop only at END SELECT
+static void skip_to_case_or_end_select(int mode) {
+    int depth = 1;
+    while (depth > 0 && current_line < num_lines - 1) {
+        current_line++;
+        const char *p = program[current_line];
+        while (*p) {
+            while (*p == ' ' || *p == '\t') p++;
+
+            // Check for SELECT CASE (nested)
+            if (to_upper(p[0]) == 'S' && to_upper(p[1]) == 'E' &&
+                to_upper(p[2]) == 'L' && to_upper(p[3]) == 'E' &&
+                to_upper(p[4]) == 'C' && to_upper(p[5]) == 'T' && !is_alpha(p[6])) {
+                depth++;
+            }
+            // Check for END SELECT
+            else if (to_upper(p[0]) == 'E' && to_upper(p[1]) == 'N' &&
+                     to_upper(p[2]) == 'D' && (p[3] == ' ' || p[3] == '\t')) {
+                const char *q = p + 4;
+                while (*q == ' ' || *q == '\t') q++;
+                if (to_upper(q[0]) == 'S' && to_upper(q[1]) == 'E' &&
+                    to_upper(q[2]) == 'L' && to_upper(q[3]) == 'E' &&
+                    to_upper(q[4]) == 'C' && to_upper(q[5]) == 'T' && !is_alpha(q[6])) {
+                    depth--;
+                    if (depth == 0) return;
+                }
+            }
+            // Check for CASE (only at depth 1, mode 0)
+            else if (depth == 1 && mode == 0 &&
+                     to_upper(p[0]) == 'C' && to_upper(p[1]) == 'A' &&
+                     to_upper(p[2]) == 'S' && to_upper(p[3]) == 'E' && !is_alpha(p[4])) {
+                current_line--;  // Back up so execute_line processes CASE
+                return;
+            }
+
+            while (*p && *p != ':') p++;
+            if (*p == ':') p++;
         }
     }
-    while (*ptr && *ptr != ':') ptr++;
+}
+
+static void stmt_select_case(void) {
+    if (select_sp >= MAX_STACK) { error("SELECT OVERFLOW"); return; }
+
+    skip_spaces();
+    SelectFrame *f = &select_stack[select_sp];
+
+    // Determine if string or integer expression
+    if (is_string_expr()) {
+        f->is_string = 1;
+        str_expr(f->str_val);
+    } else {
+        f->is_string = 0;
+        f->int_val = expr();
+    }
+    f->case_matched = 0;
+    select_sp++;
+
+    // Skip to first CASE
+    skip_to_case_or_end_select(0);
+}
+
+// String comparison helper
+static int str_compare(const char *a, const char *b) {
+    while (*a && *b && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+
+static void stmt_case(void) {
+    if (select_sp <= 0) { error("CASE WITHOUT SELECT"); return; }
+
+    SelectFrame *f = &select_stack[select_sp - 1];
+
+    // If already matched a case, skip to END SELECT
+    if (f->case_matched) {
+        skip_to_case_or_end_select(1);
+        return;
+    }
+
+    skip_spaces();
+
+    // Check for CASE ELSE
+    if (match_keyword("ELSE")) {
+        f->case_matched = 1;
+        return;  // Execute the ELSE block
+    }
+
+    // Check values in CASE clause
+    int matched = 0;
+    while (!matched && *ptr && *ptr != ':' && *ptr != '\'') {
+        skip_spaces();
+
+        if (f->is_string) {
+            // String comparison
+            char case_val[MAX_STRING_LEN];
+            str_expr(case_val);
+            if (str_compare(f->str_val, case_val) == 0) {
+                matched = 1;
+            }
+        } else {
+            // Integer comparison
+            int32_t val1 = expr();
+            skip_spaces();
+
+            // Check for range (TO)
+            if (match_keyword("TO")) {
+                int32_t val2 = expr();
+                if (f->int_val >= val1 && f->int_val <= val2) {
+                    matched = 1;
+                }
+            } else {
+                if (f->int_val == val1) {
+                    matched = 1;
+                }
+            }
+        }
+
+        skip_spaces();
+        if (*ptr == ',') {
+            ptr++;
+        } else {
+            break;
+        }
+    }
+
+    if (matched) {
+        f->case_matched = 1;
+    } else {
+        skip_to_case_or_end_select(0);
+    }
+}
+
+static void stmt_end_select(void) {
+    if (select_sp <= 0) { error("END SELECT WITHOUT SELECT"); return; }
+    select_sp--;
 }
 
 static void execute_line(const char *line) {
@@ -1294,8 +2368,36 @@ static void execute_line(const char *line) {
         else if (match_keyword("NEXT")) stmt_next();
         else if (match_keyword("WHILE")) { stmt_while(); return; }
         else if (match_keyword("WEND")) { stmt_wend(); return; }
+        else if (match_keyword("DO")) { stmt_do(); return; }
+        else if (match_keyword("LOOP")) { stmt_loop(); return; }
+        else if (match_keyword("EXIT")) {
+            skip_spaces();
+            if (match_keyword("DO")) { stmt_exit_do(); return; }
+            else if (match_keyword("FOR")) { stmt_exit_for(); return; }
+            else { error("EXPECTED DO OR FOR"); return; }
+        }
+        else if (match_keyword("ELSEIF")) { stmt_elseif(); return; }
+        else if (match_keyword("ELSE")) { stmt_else(); return; }
+        else if (match_keyword("SELECT")) {
+            skip_spaces();
+            if (match_keyword("CASE")) { stmt_select_case(); return; }
+        }
+        else if (match_keyword("CASE")) { stmt_case(); return; }
         else if (match_keyword("IF")) { stmt_if(); return; }
         else if (match_keyword("ON")) { stmt_on(); return; }
+        else if (match_keyword("DECLARE")) { stmt_declare(); }
+        else if (match_keyword("SUB")) { stmt_sub_def(); return; }
+        else if (match_keyword("FUNCTION")) { stmt_func_def(); return; }
+        else if (match_keyword("CALL")) { stmt_call(); }
+        else if (to_upper(ptr[0]) == 'E' && to_upper(ptr[1]) == 'N' && to_upper(ptr[2]) == 'D' &&
+                 ptr[3] == ' ') {
+            ptr += 4; skip_spaces();
+            if (match_keyword("IF")) { stmt_endif(); }
+            else if (match_keyword("SELECT")) { stmt_end_select(); }
+            else if (match_keyword("SUB")) { return; }  // END SUB handled by call_sub_or_func
+            else if (match_keyword("FUNCTION")) { return; }  // END FUNCTION handled by call_sub_or_func
+            else { running = 0; return; }  // END without IF/SELECT = END program
+        }
         else if (match_keyword("READ")) stmt_read();
         else if (match_keyword("RESTORE")) stmt_restore();
         else if (match_keyword("CLS")) stmt_cls();
@@ -1304,6 +2406,8 @@ static void execute_line(const char *line) {
         else if (match_keyword("CIRCLE")) stmt_circle();
         else if (match_keyword("FCIRCLE")) stmt_fcircle();
         else if (match_keyword("PAINT")) stmt_paint();
+        else if (match_keyword("LOCATE")) stmt_locate();
+        else if (match_keyword("COLOR")) stmt_color();
         else if (match_keyword("END") || match_keyword("STOP")) { running = 0; return; }
         else if (is_alpha(*ptr)) stmt_let();  // Implicit LET
         else { while (*ptr && *ptr != ':') ptr++; }
@@ -1345,10 +2449,11 @@ static void cmd_run(void) {
             }
         }
     }
-    gosub_sp = for_sp = while_sp = 0;
+    gosub_sp = for_sp = while_sp = do_sp = if_sp = select_sp = call_sp = 0;
     data_line = 0; data_ptr = 0;
     current_line = 0;
     running = 1;
+    scan_subs();  // Scan for SUB/FUNCTION definitions
 
     while (running && current_line < num_lines) {
         execute_line(program[current_line]);

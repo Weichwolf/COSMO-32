@@ -1,0 +1,18 @@
+10 REM Test LINE syntax variants
+20 CLS
+30 PRINT "LINE (x1,y1)-(x2,y2) syntax:"
+40 LINE (10, 10)-(100, 10), 15
+50 LINE (10, 10)-(10, 100), 14
+60 LINE (10, 100)-(100, 100), 13
+70 LINE (100, 10)-(100, 100), 12
+80 PRINT
+90 PRINT "LINE with B (box):"
+100 LINE (120, 20)-(200, 80), 11, B
+110 PRINT
+120 PRINT "LINE with BF (filled box):"
+130 LINE (220, 20)-(300, 80), 10, BF
+140 PRINT
+150 PRINT "Press any key..."
+160 A$ = INKEY$
+170 IF A$ = "" THEN 160
+180 END
