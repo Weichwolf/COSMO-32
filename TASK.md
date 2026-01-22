@@ -10,16 +10,13 @@ Mit PGO: **248 MIPS** (+42%)
 
 ### 1. Computed Gotos (Threaded Code)
 
-**Aufwand:** 2h | **Erwartung:** +35%
+**Aufwand:** 2h | **Ergebnis:** Verworfen ✗
 
-```cpp
-// Statt switch(opcode) - direkter Sprung
-static void* dispatch[128] = { &&ADD, &&SUB, &&LW, ... };
-ADD: r[rd] = r[rs1] + r[rs2]; goto *dispatch[decode(*pc++)];
-SUB: r[rd] = r[rs1] - r[rs2]; goto *dispatch[decode(*pc++)];
-```
+GCC 15 mit LTO generiert bereits optimale Jump-Tabellen für Switch. Computed Gotos brachten:
+- Ohne PGO: 175 → 175 MIPS (kein Unterschied)
+- Mit PGO: 248 → 204 MIPS (18% LANGSAMER!)
 
-Switch ist ein indirekter Jump der ständig misspredicted wird. Threaded Code: jeder Handler endet mit eigenem Jump → CPU lernt die Patterns pro Instruktion.
+Computed Gotos stören die PGO-Optimierungen. Der Compiler weiß es besser.
 
 ### 2. Profile-Guided Optimization (PGO)
 
@@ -97,9 +94,9 @@ export PATH="/c/msys64/ucrt64/bin:/usr/bin:/bin:$PATH"
 | Phase | Ansatz | Kumulativ |
 |-------|--------|-----------|
 | 1 | PGO | **248 MIPS** ✓ |
-| 2 | Computed Gotos | ~335 MIPS |
-| 3 | Instruction Fusion | ~420 MIPS |
-| 4 | Superblocks | ~630 MIPS |
+| 2 | Computed Gotos | Verworfen ✗ |
+| 3 | Instruction Fusion | ~310 MIPS (?) |
+| 4 | Superblocks | ~470 MIPS (?) |
 
 ## Nicht-Ziele
 

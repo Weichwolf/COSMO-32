@@ -428,11 +428,12 @@ void run_emulator(const char* firmware_path) {
             }
         }
 
-        // Run CPU for one frame (or until WFI)
+        // Run CPU for one frame worth of cycles (144 MHz / 60 FPS = 2.4M cycles)
         uint64_t target = emu.cpu.cycles + CYCLES_PER_FRAME;
         while (emu.cpu.cycles < target && !emu.cpu.halted && !emu.cpu.wfi) {
+            uint64_t batch = std::min(emu.cpu.cycles + 10000ULL, target);
+            emu.cpu.run(batch);
             emu.tick_peripherals();
-            emu.cpu.step();
 
             if (emu.cpu.mcause == static_cast<uint32_t>(cosmo::TrapCause::ECallFromMMode)) {
                 std::printf("\nECALL at PC=0x%08X, a0=%u\n", emu.cpu.mepc, emu.cpu.reg(10));
@@ -443,7 +444,7 @@ void run_emulator(const char* firmware_path) {
         // If CPU is waiting for interrupt, tick peripherals and check for wakeup
         if (emu.cpu.wfi) {
             emu.tick_peripherals();
-            emu.cpu.check_interrupts();  // May wake from WFI and take interrupt
+            emu.cpu.check_interrupts();
         }
 
         // Render display
