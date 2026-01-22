@@ -1,0 +1,6 @@
+10 A = 1
+20 B = 2
+30 PRINT "A OR B ="; A OR B
+40 C = A OR B
+50 PRINT "C ="; C
+60 END

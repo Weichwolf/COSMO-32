@@ -1,0 +1,8 @@
+10 DECLARE SUB Hello
+20 PRINT "Before"
+30 CALL Hello
+40 PRINT "After"
+50 END
+60 SUB Hello
+70   PRINT "Hello!"
+80 END SUB

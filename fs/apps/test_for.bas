@@ -1,0 +1,9 @@
+10 DECLARE SUB PrintN (N)
+20 CALL PrintN(3)
+30 END
+40 SUB PrintN (N)
+50   FOR I = 1 TO N
+60     PRINT I;
+70   NEXT I
+80   PRINT
+90 END SUB

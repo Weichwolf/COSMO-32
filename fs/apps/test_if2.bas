@@ -1,0 +1,11 @@
+10 DECLARE SUB Test (N)
+20 CALL Test(5)
+30 CALL Test(10)
+40 END
+50 SUB Test (N)
+60   IF N < 10 THEN
+70     PRINT "Small"
+80   ELSE
+90     PRINT "Large"
+100  END IF
+110 END SUB

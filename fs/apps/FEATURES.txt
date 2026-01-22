@@ -9,25 +9,25 @@ KONTROLLFLUSS
 [x] WHILE...WEND
 [x] IF...THEN (einzeilig)
 [x] IF...THEN...ELSE (einzeilig)
-[ ] IF...THEN...ELSE...END IF (Block)
+[x] IF...THEN...ELSE...END IF (Block)
 [x] GOTO
 [x] GOSUB/RETURN
 [x] ON...GOTO/GOSUB
-[ ] DO...LOOP
-[ ] DO WHILE...LOOP
-[ ] DO UNTIL...LOOP
-[ ] DO...LOOP WHILE
-[ ] DO...LOOP UNTIL
-[ ] EXIT DO
-[ ] EXIT FOR
-[ ] SELECT CASE
+[x] DO...LOOP
+[x] DO WHILE...LOOP
+[x] DO UNTIL...LOOP
+[x] DO...LOOP WHILE
+[x] DO...LOOP UNTIL
+[x] EXIT DO
+[x] EXIT FOR
+[x] SELECT CASE
 
 SUBROUTINEN
 -----------
-[ ] SUB...END SUB
-[ ] FUNCTION...END FUNCTION
-[ ] DECLARE
-[ ] CALL
+[x] SUB...END SUB
+[x] FUNCTION...END FUNCTION
+[x] DECLARE
+[x] CALL
 [ ] SHARED
 [ ] STATIC
 
@@ -36,9 +36,9 @@ VARIABLEN
 [x] LET (optional)
 [x] DIM (arrays)
 [ ] REDIM
-[ ] ERASE
+[x] ERASE
 [ ] CONST
-[ ] SWAP
+[x] SWAP
 [ ] OPTION BASE
 [ ] DEFtype (DEFINT, DEFSNG, etc.)
 [ ] TYPE...END TYPE
@@ -47,11 +47,11 @@ AUSGABE
 -------
 [x] PRINT
 [x] PRINT mit ; und ,
-[ ] PRINT USING
-[ ] TAB(n)
-[ ] SPC(n)
-[ ] LOCATE row, col
-[ ] COLOR fg [,bg]
+[x] PRINT USING
+[x] TAB(n)
+[x] SPC(n)
+[x] LOCATE row, col
+[x] COLOR fg [,bg]
 [ ] WIDTH
 [ ] WRITE
 
@@ -59,9 +59,9 @@ EINGABE
 -------
 [x] INPUT
 [x] INPUT "prompt";
-[ ] LINE INPUT
-[ ] INPUT$(n)
-[ ] INKEY$ (haben wir!)
+[x] LINE INPUT
+[x] INPUT$(n)
+[x] INKEY$
 
 STRING-FUNKTIONEN
 -----------------
@@ -74,31 +74,31 @@ STRING-FUNKTIONEN
 [x] ASC
 [x] STR$
 [x] VAL
-[ ] UCASE$
-[ ] LCASE$
-[ ] LTRIM$
-[ ] RTRIM$
-[ ] INSTR
-[ ] SPACE$
-[ ] STRING$
-[ ] HEX$
-[ ] OCT$
+[x] UCASE$
+[x] LCASE$
+[x] LTRIM$
+[x] RTRIM$
+[x] INSTR
+[x] SPACE$
+[x] STRING$
+[x] HEX$
+[x] OCT$
 
 NUMERISCHE FUNKTIONEN
 ---------------------
 [x] ABS
 [x] SGN
 [x] INT
-[ ] FIX
+[x] FIX
 [ ] CINT, CLNG
 [x] RND
-[ ] RANDOMIZE
-[ ] SQR (Wurzel)
-[ ] SIN, COS, TAN
-[ ] ATN, LOG, EXP
-[ ] ^ (Potenz)
-[ ] \ (Integer-Division)
-[ ] MOD (haben wir!)
+[x] RANDOMIZE
+[x] SQR (Integer-Wurzel)
+[ ] SIN, COS, TAN (kein Float)
+[ ] ATN, LOG, EXP (kein Float)
+[x] ^ (Potenz)
+[x] \ (Integer-Division)
+[x] MOD
 
 DATEN
 -----
@@ -111,8 +111,9 @@ GRAFIK (COSMO-32 spezifisch)
 [x] CLS
 [x] PSET
 [x] LINE (4 Punkte)
-[ ] LINE (x1,y1)-(x2,y2) Syntax
-[ ] LINE ...BF (Box Fill)
+[x] LINE (x1,y1)-(x2,y2) Syntax
+[x] LINE ...B (Box)
+[x] LINE ...BF (Box Fill)
 [x] CIRCLE
 [x] FCIRCLE (Erweiterung)
 [x] PAINT
@@ -123,25 +124,16 @@ GRAFIK (COSMO-32 spezifisch)
 [ ] VIEW
 [ ] WINDOW
 
-DATEI-I/O
----------
-[ ] OPEN
-[ ] CLOSE
-[ ] INPUT #
-[ ] PRINT #
-[ ] LINE INPUT #
-[ ] WRITE #
-[ ] GET #, PUT #
-[ ] LOF, LOC, EOF
-[ ] SEEK
-[ ] FILES
-[ ] KILL, NAME
-[ ] MKDIR, RMDIR, CHDIR
+DATEI-I/O (nicht geplant - TFTP stattdessen)
+--------------------------------------------
+[ ] OPEN/CLOSE
+[ ] INPUT #, PRINT #
+[ ] etc.
 
 SONSTIGES
 ---------
-[ ] SLEEP
-[ ] BEEP / SOUND
+[x] SLEEP (no-op im Emulator)
+[x] BEEP (no-op im Emulator)
 [ ] PLAY (Musik)
 [ ] TIMER ON/OFF
 [ ] ON ERROR
@@ -158,31 +150,17 @@ SONSTIGES
 OPERATOREN
 ----------
 [x] +, -, *, /
-[ ] \ (Integer-Division)
-[ ] ^ (Potenz)
+[x] \ (Integer-Division)
+[x] ^ (Potenz)
 [x] MOD
-[x] =, <>, <, >, <=, >=
+[x] =, <>, <, >, <=, >= (auch fuer Strings!)
 [x] AND, OR
 [x] NOT
 
-PRIORITAET FUER IMPLEMENTIERUNG
-===============================
+ZUSAMMENFASSUNG
+===============
+Implementiert:  ~75 Features
+Fehlend:        ~25 Features (meist Float, Datei-I/O, erweiterte Grafik)
 
-Phase 1 - Kontrolfluss:
-  DO...LOOP, EXIT DO/FOR, SELECT CASE, Block-IF
-
-Phase 2 - Strings:
-  TAB, SPC, UCASE$, LCASE$, INSTR, SPACE$, STRING$,
-  LTRIM$, RTRIM$, INPUT$
-
-Phase 3 - Ausgabe:
-  LOCATE, COLOR, PRINT USING
-
-Phase 4 - Subroutinen:
-  SUB/END SUB, FUNCTION/END FUNCTION, CALL
-
-Phase 5 - Numerisch:
-  \, ^, RANDOMIZE, SQR, Trigonometrie
-
-Phase 6 - Sonstiges:
-  SWAP, SLEEP, BEEP, LINE INPUT
+Integer-only Design: Keine Trigonometrie, kein LOG/EXP.
+Datei-I/O via TFTP statt OPEN/CLOSE.

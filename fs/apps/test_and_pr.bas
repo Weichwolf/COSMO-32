@@ -1,0 +1,2 @@
+10 PRINT 1 AND 1
+20 END

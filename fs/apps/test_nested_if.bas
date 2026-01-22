@@ -1,0 +1,15 @@
+10 DECLARE SUB Test
+20 CALL Test
+30 END
+40 SUB Test
+50   FOR Y = 1 TO 2
+60     FOR X = 1 TO 2
+70       IF X = 1 THEN
+80         PRINT "A";
+90       ELSE
+100        PRINT "B";
+110      END IF
+120    NEXT X
+130    PRINT
+140  NEXT Y
+150 END SUB

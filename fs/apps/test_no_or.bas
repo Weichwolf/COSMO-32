@@ -1,0 +1,7 @@
+10 X = 1
+20 IF X = 1 THEN
+30   PRINT "Yes"
+40 ELSE
+50   PRINT "No"
+60 END IF
+70 END

@@ -1,0 +1,12 @@
+10 DECLARE SUB Test (N)
+20 CALL Test(3)
+30 END
+40 SUB Test (N)
+50   FOR I = 1 TO N
+60     IF I = 2 THEN
+70       PRINT "Two"
+80     ELSE
+90       PRINT "Other"
+100    END IF
+110  NEXT I
+120 END SUB

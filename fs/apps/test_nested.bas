@@ -1,0 +1,11 @@
+10 DECLARE SUB Grid (W, H)
+20 CALL Grid(3, 2)
+30 END
+40 SUB Grid (W, H)
+50   FOR Y = 1 TO H
+60     FOR X = 1 TO W
+70       PRINT "*";
+80     NEXT X
+90     PRINT
+100  NEXT Y
+110 END SUB

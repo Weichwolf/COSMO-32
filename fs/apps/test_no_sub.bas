@@ -1,0 +1,11 @@
+10 FOR Y = 1 TO 2
+20   FOR X = 1 TO 2
+30     IF X = 1 OR Y = 1 THEN
+40       PRINT "*";
+50     ELSE
+60       PRINT " ";
+70     END IF
+80   NEXT X
+90   PRINT
+100 NEXT Y
+110 END

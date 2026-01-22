@@ -1,0 +1,2 @@
+10 PRINT 1 OR 0
+20 END

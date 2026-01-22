@@ -1,0 +1,4 @@
+10 A = 1
+20 B = 2
+30 PRINT A OR B
+40 END
