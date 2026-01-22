@@ -34,6 +34,7 @@
 #define ETH_BASE        0x40023000
 
 #define TIMER_BASE      0xE0000000
+#define HOSTCLOCK_BASE  0xE0001000
 #define PFIC_BASE       0xE000E000
 
 //----------------------------------------------------------------------
@@ -90,6 +91,15 @@
 
 #define TIMER_MTIME     0x00
 #define TIMER_MTIMECMP  0x08
+
+//----------------------------------------------------------------------
+// Host Clock Registers (offset from HOSTCLOCK_BASE)
+// Real-time microseconds from host system
+//----------------------------------------------------------------------
+
+#define HOSTCLOCK_US_LO   0x00  // Latched microseconds, low 32 bits (ro)
+#define HOSTCLOCK_US_HI   0x04  // Latched microseconds, high 32 bits (ro)
+#define HOSTCLOCK_LATCH   0x08  // Write to latch current time (wo)
 
 //----------------------------------------------------------------------
 // ETH MAC Registers (offset from ETH_BASE)

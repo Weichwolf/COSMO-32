@@ -15,6 +15,7 @@
 #include "device/display.hpp"
 #include "device/i2s.hpp"
 #include "device/eth.hpp"
+#include "device/hostclock.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -50,8 +51,10 @@ constexpr uint32_t FSMC_BASE    = 0x60000000;
 constexpr uint32_t FSMC_SIZE    = 0x100000;  // 1MB
 constexpr uint32_t I2S_BASE     = 0x40013000;
 constexpr uint32_t I2S_SIZE     = 0x100;
-constexpr uint32_t ETH_BASE     = 0x40023000;
-constexpr uint32_t ETH_SIZE     = 0x1000;
+constexpr uint32_t ETH_BASE       = 0x40023000;
+constexpr uint32_t ETH_SIZE       = 0x1000;
+constexpr uint32_t HOSTCLOCK_BASE = 0xE0001000;
+constexpr uint32_t HOSTCLOCK_SIZE = 0x100;
 
 // Emulator context - centralizes device setup
 struct EmulatorContext {
@@ -65,6 +68,7 @@ struct EmulatorContext {
     cosmo::DisplayControl display;
     cosmo::I2S i2s;
     cosmo::ETH eth;
+    cosmo::HostClock hostclock;
     cosmo::Bus bus;
     cosmo::CPU cpu{&bus};
 
@@ -80,6 +84,7 @@ struct EmulatorContext {
         bus.map(FSMC_BASE, FSMC_SIZE, &fsmc);
         bus.map(I2S_BASE, I2S_SIZE, &i2s);
         bus.map(ETH_BASE, ETH_SIZE, &eth);
+        bus.map(HOSTCLOCK_BASE, HOSTCLOCK_SIZE, &hostclock);
 
         // Fast-path for frequent memory regions (direct data pointers)
         bus.set_fast_path(flash.data(), FLASH_SIZE,

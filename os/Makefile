@@ -7,7 +7,6 @@ export TEMP := /tmp
 PREFIX   := riscv64-unknown-elf-
 AS       := $(PREFIX)as
 CC       := $(PREFIX)gcc
-LD       := $(PREFIX)ld
 OBJCOPY  := $(PREFIX)objcopy
 OBJDUMP  := $(PREFIX)objdump
 
@@ -15,7 +14,8 @@ ARCH     := -march=rv32imac_zicsr -mabi=ilp32
 
 ASFLAGS  := $(ARCH) -Isrc
 CFLAGS   := $(ARCH) -O2 -ffreestanding -nostdlib -Wall -Wextra -Isrc
-LDFLAGS  := -m elf32lriscv -T link.ld -nostdlib
+LDFLAGS  := $(ARCH) -T link.ld -nostdlib -Wl,--gc-sections
+LDLIBS   := -lgcc
 
 SRC_S    := $(wildcard src/*.S)
 SRC_C    := $(wildcard src/*.c)
@@ -26,7 +26,7 @@ OBJ      := $(SRC_S:.S=.o) $(SRC_C:.c=.o)
 all: firmware.bin
 
 firmware.elf: $(OBJ)
-	$(LD) $(LDFLAGS) -o $@ $^
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 firmware.bin: firmware.elf
 	$(OBJCOPY) -O binary $< $@

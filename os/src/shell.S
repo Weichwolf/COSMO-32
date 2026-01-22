@@ -8,7 +8,7 @@
 
 .section .rodata
 prompt:         .asciz "> "
-msg_help:       .asciz "Commands: help status regs mem poke net ping ls cat get put run basic exit reset\n"
+msg_help:       .asciz "Commands: help status regs mem poke net ping ls cat get put run basic bench exit reset\n"
 msg_status:     .asciz "COSMO-32 OS v0.1\n"
 msg_cpu:        .asciz "CPU:    RV32IMAC @ 144MHz\n"
 msg_ram:        .asciz "RAM:    64KB SRAM + 1MB FSMC\n"
@@ -64,6 +64,7 @@ cmd_cat:        .asciz "cat"
 cmd_get:        .asciz "get"
 cmd_put:        .asciz "put"
 cmd_basic:      .asciz "basic"
+cmd_bench:      .asciz "bench"
 
 hex_chars:      .asciz "0123456789ABCDEF"
 
@@ -108,10 +109,30 @@ shell_init:
 #----------------------------------------------------------------------
 # trap_handler: Minimal interrupt/exception handler
 # For USART RX: just return, data will be read by getchar
+# For ECALL: halt (exit command)
 #----------------------------------------------------------------------
 .align 4
 trap_handler:
-    # Simply return - WFI will be woken, getchar will read data
+    # Save t0, t1 on stack
+    addi    sp, sp, -8
+    sw      t0, 0(sp)
+    sw      t1, 4(sp)
+
+    csrr    t0, mcause
+    li      t1, 11              # ECallFromMMode (no interrupt bit)
+    bne     t0, t1, .trap_return
+
+    # ECALL: halt forever (emulator checks mcause)
+    # No need to restore regs - we're halting
+.halt_loop:
+    wfi
+    j       .halt_loop
+
+.trap_return:
+    # Restore t0, t1
+    lw      t0, 0(sp)
+    lw      t1, 4(sp)
+    addi    sp, sp, 8
     mret
 
 #----------------------------------------------------------------------
@@ -239,6 +260,11 @@ execute_cmd:
     la      a1, cmd_basic
     call    str_starts_with
     bnez    a0, do_basic
+
+    mv      a0, s0
+    la      a1, cmd_bench
+    call    str_starts_with
+    bnez    a0, do_bench
 
     # Unknown command
     la      a0, msg_unknown
@@ -646,6 +672,11 @@ do_basic:
     call    skip_spaces
     # a0 = pointer to filename (or empty string)
     call    basic_main
+    j       exec_done
+
+do_bench:
+    # bench - Run benchmark suite
+    call    bench_main
     j       exec_done
 
 exec_done:

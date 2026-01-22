@@ -49,26 +49,7 @@ Häufige Sequenzen als einzelne Handler:
 
 Firmware offline scannen, Fusionen im Decoder markieren.
 
-### 4. Lazy Flag Evaluation
-
-**Aufwand:** 3h | **Erwartung:** +20%
-
-```cpp
-// Nicht:
-flags.zero = (result == 0);
-flags.neg = (result < 0);
-
-// Sondern:
-last_op = OP_ADD;
-last_a = a; last_b = b; last_result = result;
-
-// Erst bei Branch evaluieren:
-bool IsZero() { return last_result == 0; }
-```
-
-~80% der Flag-Berechnungen werden nie gelesen.
-
-### 5. Superblock Interpretation
+### 4. Superblock Interpretation
 
 **Aufwand:** 8h | **Erwartung:** +50%
 
@@ -87,7 +68,7 @@ void block_0x1000() {
 
 Offline generiert aus Firmware-Analyse. Kein JIT, aber ähnliche Vorteile.
 
-### 6. Partial Evaluation (Futamura-Projektion)
+### 5. Partial Evaluation (Futamura-Projektion)
 
 **Aufwand:** 20h+ | **Erwartung:** +100-200%
 
@@ -98,6 +79,13 @@ Interpreter spezialisiert auf *diese* Firmware:
 - Nur Execute bleibt
 
 Der Interpreter wird zum Compiler durch Spezialisierung auf das Programm.
+
+## Testen
+
+```bash
+export PATH="/c/msys64/ucrt64/bin:/usr/bin:/bin:$PATH"
+./emu/build/cosmo32.exe --headless os/firmware.bin --cmd "bench" --timeout 15000
+```
 
 ## Roadmap
 
