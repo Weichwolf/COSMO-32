@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Optimierungen
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fsanitize=address,undefined")
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -march=native -g -pg")  # For gprof
 
 # SDL2 - ohne SDL2main (wir nutzen SDL_MAIN_HANDLED)
 find_package(SDL2 REQUIRED CONFIG)

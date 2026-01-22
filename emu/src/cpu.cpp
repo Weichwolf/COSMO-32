@@ -1,6 +1,7 @@
 #include "cpu.hpp"
 #include "decode.hpp"
 #include "device/pfic.hpp"
+#include <algorithm>
 #include <cstdio>
 
 namespace cosmo {
@@ -196,6 +197,63 @@ void CPU::step() {
 
     pc += inst_len_;
     cycles++;
+}
+
+void CPU::step_fast() {
+    // Fast path - no interrupt check, no halt/wfi check
+    uint32_t inst = bus->read32(pc);
+    inst_len_ = 4;
+
+    if (is_compressed(inst)) {
+        uint16_t cinst = inst & 0xFFFF;
+        inst = expand_compressed(cinst);
+        inst_len_ = 2;
+        if (inst == 0) {
+            illegal_instruction(cinst);
+            return;
+        }
+    }
+
+    uint32_t op = opcode(inst);
+
+    switch (static_cast<OpType>(op)) {
+        case OpType::OP:       exec_op(inst); break;
+        case OpType::OP_IMM:   exec_op_imm(inst); break;
+        case OpType::LOAD:     exec_load(inst); break;
+        case OpType::STORE:    exec_store(inst); break;
+        case OpType::BRANCH:   exec_branch(inst); return;
+        case OpType::JAL:      exec_jal(inst); return;
+        case OpType::JALR:     exec_jalr(inst); return;
+        case OpType::LUI:      exec_lui(inst); break;
+        case OpType::AUIPC:    exec_auipc(inst); break;
+        case OpType::SYSTEM:   exec_system(inst); if (op == 0x73 && funct3(inst) == 0) return; break;
+        case OpType::AMO:      exec_amo(inst); break;
+        case OpType::MISC_MEM: exec_misc_mem(inst); break;
+        default:
+            illegal_instruction(inst);
+            return;
+    }
+
+    pc += inst_len_;
+    cycles++;
+}
+
+void CPU::run(uint64_t target_cycles) {
+    constexpr uint64_t BATCH_SIZE = 1024;
+
+    while (cycles < target_cycles && !halted && !wfi) {
+        // Check interrupts periodically
+        if (check_interrupts()) {
+            cycles++;
+            continue;
+        }
+
+        // Run batch without interrupt checks
+        uint64_t batch_end = std::min(cycles + BATCH_SIZE, target_cycles);
+        while (cycles < batch_end && !halted && !wfi) {
+            step_fast();
+        }
+    }
 }
 
 void CPU::exec_op(uint32_t inst) {

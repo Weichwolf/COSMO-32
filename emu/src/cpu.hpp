@@ -98,6 +98,8 @@ public:
 
     // Execution
     void step();
+    void step_fast();  // No interrupt check
+    void run(uint64_t cycles);  // Batch execution
     void reset(uint32_t start_pc = 0);
 
     // Interrupt check - returns true if interrupt was taken

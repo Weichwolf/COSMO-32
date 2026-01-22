@@ -539,17 +539,31 @@ void run_headless(const char* firmware_path, const char* input_str = nullptr,
     constexpr uint64_t CYCLES_PER_MS = 144'000;
     uint64_t max_cycles = (timeout_ms > 0) ? timeout_ms * CYCLES_PER_MS : 100'000'000;
 
+    auto start = std::chrono::steady_clock::now();
+    uint64_t start_cycles = emu.cpu.cycles;
+
+    constexpr uint64_t PERIPHERAL_TICK_INTERVAL = 10000;
     while (emu.cpu.cycles < max_cycles && !emu.cpu.halted) {
+        uint64_t batch_target = std::min(emu.cpu.cycles + PERIPHERAL_TICK_INTERVAL, max_cycles);
+        emu.cpu.run(batch_target);
         emu.tick_peripherals();
-        emu.cpu.step();
 
         if (emu.cpu.mcause == static_cast<uint32_t>(cosmo::TrapCause::ECallFromMMode)) {
             break;
         }
     }
 
+    auto end = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    uint64_t total_cycles = emu.cpu.cycles - start_cycles;
+    double mips = (total_cycles / 1000000.0) / (duration_ms / 1000.0);
+    std::fprintf(stderr, "\n--- Performance ---\n");
+    std::fprintf(stderr, "Cycles: %lu, Time: %lu ms, MIPS: %.2f\n",
+                 static_cast<unsigned long>(total_cycles),
+                 static_cast<unsigned long>(duration_ms), mips);
+
     if (emu.cpu.cycles >= max_cycles && timeout_ms > 0) {
-        std::fprintf(stderr, "\nTimeout after %lu ms\n", static_cast<unsigned long>(timeout_ms));
+        std::fprintf(stderr, "Timeout after %lu ms\n", static_cast<unsigned long>(timeout_ms));
     }
 
     if (screenshot_path) {
