@@ -29,9 +29,21 @@ struct DeviceMapping {
 class Bus {
     std::vector<DeviceMapping> mappings_;
 
+    // Fast-path with direct data pointers (no virtual calls)
+    uint8_t* flash_data_ = nullptr;
+    uint32_t flash_end_ = 0;
+    uint8_t* sram_data_ = nullptr;
+    uint32_t sram_base_ = 0, sram_end_ = 0;
+
 public:
     void map(uint32_t base, uint32_t size, Device* dev) {
         mappings_.push_back({base, size, dev});
+    }
+
+    void set_fast_path(uint8_t* flash, uint32_t fs,
+                       uint8_t* sram, uint32_t sb, uint32_t ss) {
+        flash_data_ = flash; flash_end_ = fs;
+        sram_data_ = sram; sram_base_ = sb; sram_end_ = sb + ss;
     }
 
     Device* find(uint32_t addr) const {
@@ -51,17 +63,50 @@ public:
     }
 
     uint32_t read(uint32_t addr, Width w) {
-        if (auto* dev = find(addr))
-            return dev->read(offset(addr), w);
+        // Fast-path for flash (inline, no virtual call)
+        if (addr < flash_end_) {
+            switch (w) {
+                case Width::Byte: return flash_data_[addr];
+                case Width::Half: return *reinterpret_cast<uint16_t*>(flash_data_ + addr);
+                case Width::Word: return *reinterpret_cast<uint32_t*>(flash_data_ + addr);
+            }
+        }
+        // Fast-path for sram (inline, no virtual call)
+        if (addr >= sram_base_ && addr < sram_end_) {
+            uint8_t* p = sram_data_ + (addr - sram_base_);
+            switch (w) {
+                case Width::Byte: return *p;
+                case Width::Half: return *reinterpret_cast<uint16_t*>(p);
+                case Width::Word: return *reinterpret_cast<uint32_t*>(p);
+            }
+        }
+        // Slow path for peripherals
+        for (auto& m : mappings_) {
+            if (addr >= m.base && addr < m.base + m.size)
+                return m.device->read(addr - m.base, w);
+        }
         std::fprintf(stderr, "[BUS] Unmapped read: 0x%08X\n", addr);
         return 0;
     }
 
     void write(uint32_t addr, Width w, uint32_t val) {
-        if (auto* dev = find(addr))
-            dev->write(offset(addr), w, val);
-        else
-            std::fprintf(stderr, "[BUS] Unmapped write: 0x%08X = 0x%08X\n", addr, val);
+        // Fast-path for sram (inline, no virtual call)
+        if (addr >= sram_base_ && addr < sram_end_) {
+            uint8_t* p = sram_data_ + (addr - sram_base_);
+            switch (w) {
+                case Width::Byte: *p = val; return;
+                case Width::Half: *reinterpret_cast<uint16_t*>(p) = val; return;
+                case Width::Word: *reinterpret_cast<uint32_t*>(p) = val; return;
+            }
+        }
+        // Slow path for peripherals
+        for (auto& m : mappings_) {
+            if (addr >= m.base && addr < m.base + m.size) {
+                m.device->write(addr - m.base, w, val);
+                return;
+            }
+        }
+        std::fprintf(stderr, "[BUS] Unmapped write: 0x%08X = 0x%08X\n", addr, val);
     }
 
     uint32_t read8(uint32_t addr) { return read(addr, Width::Byte); }

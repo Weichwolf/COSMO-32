@@ -81,6 +81,10 @@ struct EmulatorContext {
         bus.map(I2S_BASE, I2S_SIZE, &i2s);
         bus.map(ETH_BASE, ETH_SIZE, &eth);
 
+        // Fast-path for frequent memory regions (direct data pointers)
+        bus.set_fast_path(flash.data(), FLASH_SIZE,
+                          sram.data(), SRAM_BASE, SRAM_SIZE);
+
         // DMA needs bus access for transfers
         dma1.set_bus_callbacks(
             [this](uint32_t addr, cosmo::Width w) { return bus.read(addr, w); },

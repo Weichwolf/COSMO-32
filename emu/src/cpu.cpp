@@ -159,13 +159,13 @@ void CPU::step() {
 
     // Fetch instruction
     uint32_t inst = bus->read32(pc);
-    uint32_t inst_len = 4;
+    inst_len_ = 4;
 
     // Check for compressed instruction
     if (is_compressed(inst)) {
         uint16_t cinst = inst & 0xFFFF;
         inst = expand_compressed(cinst);
-        inst_len = 2;
+        inst_len_ = 2;
         if (inst == 0) {
             illegal_instruction(cinst);
             return;
@@ -194,7 +194,7 @@ void CPU::step() {
             return;
     }
 
-    pc += inst_len;
+    pc += inst_len_;
     cycles++;
 }
 
@@ -453,7 +453,7 @@ void CPU::exec_branch(uint32_t inst) {
         }
         pc = target;
     } else {
-        pc += is_compressed(bus->read32(pc)) ? 2 : 4;
+        pc += inst_len_;
     }
     cycles++;
 }
@@ -463,15 +463,12 @@ void CPU::exec_jal(uint32_t inst) {
     int32_t offset = imm_j(inst);
     uint32_t target = pc + offset;
 
-    // Determine instruction length for return address
-    uint32_t inst_len = is_compressed(bus->read32(pc)) ? 2 : 4;
-
     if (target & 0x1) {
         take_trap(TrapCause::InstructionAddressMisaligned);
         return;
     }
 
-    set_reg(d, pc + inst_len);
+    set_reg(d, pc + inst_len_);
     pc = target;
     cycles++;
 }
@@ -482,9 +479,7 @@ void CPU::exec_jalr(uint32_t inst) {
     int32_t offset = imm_i(inst);
     uint32_t target = (base + offset) & ~1;
 
-    uint32_t inst_len = is_compressed(bus->read32(pc)) ? 2 : 4;
-
-    set_reg(d, pc + inst_len);
+    set_reg(d, pc + inst_len_);
     pc = target;
     cycles++;
 }

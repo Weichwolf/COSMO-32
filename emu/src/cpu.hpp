@@ -76,6 +76,9 @@ public:
     bool halted = false;
     bool wfi = false;  // Wait for interrupt
 
+    // Current instruction length (set by step(), used by branch/jal/jalr)
+    uint32_t inst_len_ = 4;
+
     explicit CPU(Bus* b) : bus(b) {}
 
     void set_pfic(PFIC* p) { pfic = p; }

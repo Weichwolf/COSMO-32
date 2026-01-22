@@ -16,40 +16,27 @@ public:
     size_t size() const { return data_.size(); }
 
     uint32_t read(uint32_t addr, Width w) override {
-        if (addr >= data_.size()) return 0;
-        uint32_t val = 0;
         switch (w) {
-            case Width::Byte: val = data_[addr]; break;
+            case Width::Byte:
+                return data_[addr];
             case Width::Half:
-                if (addr + 1 >= data_.size()) return 0;
-                val = data_[addr] | (data_[addr + 1] << 8);
-                break;
+                return *reinterpret_cast<uint16_t*>(&data_[addr]);
             case Width::Word:
-                if (addr + 3 >= data_.size()) return 0;
-                val = data_[addr] | (data_[addr + 1] << 8) |
-                       (data_[addr + 2] << 16) | (data_[addr + 3] << 24);
-                break;
+                return *reinterpret_cast<uint32_t*>(&data_[addr]);
         }
-        return val;
+        return 0;
     }
 
     void write(uint32_t addr, Width w, uint32_t val) override {
-        if (addr >= data_.size()) return;
         switch (w) {
             case Width::Byte:
-                data_[addr] = val & 0xFF;
+                data_[addr] = val;
                 break;
             case Width::Half:
-                if (addr + 1 >= data_.size()) return;
-                data_[addr] = val & 0xFF;
-                data_[addr + 1] = (val >> 8) & 0xFF;
+                *reinterpret_cast<uint16_t*>(&data_[addr]) = val;
                 break;
             case Width::Word:
-                if (addr + 3 >= data_.size()) return;
-                data_[addr] = val & 0xFF;
-                data_[addr + 1] = (val >> 8) & 0xFF;
-                data_[addr + 2] = (val >> 16) & 0xFF;
-                data_[addr + 3] = (val >> 24) & 0xFF;
+                *reinterpret_cast<uint32_t*>(&data_[addr]) = val;
                 break;
         }
     }
@@ -81,16 +68,13 @@ public:
     }
 
     uint32_t read(uint32_t addr, Width w) override {
-        if (addr >= data_.size()) return 0;
         switch (w) {
-            case Width::Byte: return data_[addr];
+            case Width::Byte:
+                return data_[addr];
             case Width::Half:
-                if (addr + 1 >= data_.size()) return 0;
-                return data_[addr] | (data_[addr + 1] << 8);
+                return *reinterpret_cast<uint16_t*>(&data_[addr]);
             case Width::Word:
-                if (addr + 3 >= data_.size()) return 0;
-                return data_[addr] | (data_[addr + 1] << 8) |
-                       (data_[addr + 2] << 16) | (data_[addr + 3] << 24);
+                return *reinterpret_cast<uint32_t*>(&data_[addr]);
         }
         return 0;
     }
