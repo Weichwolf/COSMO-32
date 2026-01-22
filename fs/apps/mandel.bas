@@ -3,9 +3,9 @@
 30 CLS
 40 T0 = TIMER
 50 SC = 256
-60 MAXI = 8
+60 MAXI = 20
 70 W = 320
-80 H = 2
+80 H = 200
 90 FOR PY = 0 TO H - 1
 100 FOR PX = 0 TO W - 1
 110 REM Map pixel to complex plane

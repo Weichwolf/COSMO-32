@@ -1,36 +1,36 @@
-10 REM Test Numeric Functions
+10 REM Test Numeric Functions (Integer-only)
 20 PRINT "Integer Division (\):"
-30 PRINT "17 \ 5 ="; 17 \ 5
-40 PRINT "100 \ 7 ="; 100 \ 7
-50 PRINT
-60 PRINT "Power (^):"
-70 PRINT "2 ^ 8 ="; 2 ^ 8
-80 PRINT "3 ^ 4 ="; 3 ^ 4
-90 PRINT "10 ^ 3 ="; 10 ^ 3
-100 PRINT
-110 PRINT "SQR (Square Root):"
-120 PRINT "SQR(16) ="; SQR(16)
-130 PRINT "SQR(2) ="; SQR(2)
-140 PRINT
-150 PRINT "Trigonometry:"
-160 PI = 3.14159
-170 PRINT "SIN(0) ="; SIN(0)
-180 PRINT "COS(0) ="; COS(0)
-190 PRINT "TAN(PI/4) ="; TAN(PI / 4)
-200 PRINT "ATN(1)*4 ="; ATN(1) * 4
+30 PRINT "17 \ 5 ="; 17 \ 5; "(expect 3)"
+40 PRINT "100 \ 7 ="; 100 \ 7; "(expect 14)"
+50 PRINT "-17 \ 5 ="; -17 \ 5; "(expect -3)"
+60 PRINT
+70 PRINT "Power (^):"
+80 PRINT "2 ^ 8 ="; 2 ^ 8; "(expect 256)"
+90 PRINT "3 ^ 4 ="; 3 ^ 4; "(expect 81)"
+100 PRINT "10 ^ 3 ="; 10 ^ 3; "(expect 1000)"
+110 PRINT "5 ^ 0 ="; 5 ^ 0; "(expect 1)"
+120 PRINT
+130 PRINT "SQR (Integer Square Root):"
+140 PRINT "SQR(16) ="; SQR(16); "(expect 4)"
+150 PRINT "SQR(17) ="; SQR(17); "(expect 4)"
+160 PRINT "SQR(100) ="; SQR(100); "(expect 10)"
+170 PRINT
+180 PRINT "FIX (truncate toward 0):"
+190 PRINT "FIX(7) ="; FIX(7); "(expect 7)"
+200 PRINT "FIX(-7) ="; FIX(-7); "(expect -7)"
 210 PRINT
-220 PRINT "LOG and EXP:"
-230 PRINT "LOG(10) ="; LOG(10)
-240 PRINT "EXP(1) ="; EXP(1)
-250 PRINT
-260 PRINT "FIX vs INT:"
-270 PRINT "INT(-3.7) ="; INT(-3.7)
-280 PRINT "FIX(-3.7) ="; FIX(-3.7)
-290 PRINT
-300 PRINT "RANDOMIZE test:"
-310 RANDOMIZE 12345
-320 FOR I = 1 TO 5
-330   PRINT RND;
-340 NEXT I
-350 PRINT
+220 PRINT "RANDOMIZE test:"
+230 RANDOMIZE 12345
+240 FOR I = 1 TO 5
+250   PRINT RND;
+260 NEXT I
+270 PRINT
+280 PRINT
+290 PRINT "Combined:"
+300 A = 2 ^ 4 \ 3
+310 PRINT "2 ^ 4 \ 3 ="; A; "(expect 5)"
+320 B = SQR(81) + 2 ^ 3
+330 PRINT "SQR(81) + 2 ^ 3 ="; B; "(expect 17)"
+340 PRINT
+350 PRINT "Done."
 360 END

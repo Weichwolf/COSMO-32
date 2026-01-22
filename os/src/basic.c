@@ -79,6 +79,7 @@ static int num_vars = 0;
 // Execution state
 static int running = 0;
 static int current_line = 0;
+static int jump_pending = 0;  // Set by NEXT/GOTO etc to prevent current_line++
 static const char *ptr;
 
 // GOSUB stack
@@ -161,6 +162,7 @@ static uint32_t rng_state = 12345;
 
 // Forward declarations
 static int32_t expr(void);
+static int is_string_expr(void);
 static void str_expr(char *dest);
 static void execute_line(const char *line);
 static int find_sub(const char *name);
@@ -833,6 +835,25 @@ static int32_t factor(void) {
         return n;
     }
 
+    if (match_keyword("FIX")) {
+        if (*ptr == '(') ptr++;
+        int32_t n = expr();
+        if (*ptr == ')') ptr++;
+        return n;  // For integers, FIX = identity (truncate toward 0)
+    }
+
+    if (match_keyword("SQR")) {
+        if (*ptr == '(') ptr++;
+        int32_t n = expr();
+        if (*ptr == ')') ptr++;
+        if (n < 0) return 0;
+        // Integer square root via Newton's method
+        if (n == 0) return 0;
+        int32_t x = n, y = (x + 1) / 2;
+        while (y < x) { x = y; y = (x + n / x) / 2; }
+        return x;
+    }
+
     if (match_keyword("LEN")) {
         if (*ptr == '(') ptr++;
         char tmp[MAX_STRING_LEN];
@@ -965,18 +986,38 @@ static int32_t factor(void) {
     return 0;
 }
 
+static int32_t power_expr(void) {
+    int32_t base = factor();
+    skip_spaces();
+    if (*ptr == '^') {
+        ptr++;
+        int32_t exp = power_expr();  // Right-associative: 2^3^2 = 2^(3^2)
+        int32_t result = 1;
+        int neg = (exp < 0);
+        if (neg) exp = -exp;
+        while (exp-- > 0) result *= base;
+        return neg ? (base != 0 ? 1 / result : 0) : result;
+    }
+    return base;
+}
+
 static int32_t term(void) {
-    int32_t result = factor();
+    int32_t result = power_expr();
     while (1) {
         skip_spaces();
-        if (*ptr == '*') { ptr++; result *= factor(); }
+        if (*ptr == '*') { ptr++; result *= power_expr(); }
         else if (*ptr == '/') {
             ptr++;
-            int32_t d = factor();
+            int32_t d = power_expr();
             if (d != 0) result /= d;
         }
+        else if (*ptr == '\\') {
+            ptr++;
+            int32_t d = power_expr();
+            if (d != 0) result /= d;  // Integer division (same as / for integers)
+        }
         else if (match_keyword("MOD")) {
-            int32_t d = factor();
+            int32_t d = power_expr();
             if (d != 0) result %= d;
         }
         else break;
@@ -996,6 +1037,36 @@ static int32_t arith_expr(void) {
 }
 
 static int32_t comp_expr(void) {
+    skip_spaces();
+    // Check if this is a string comparison
+    if (is_string_expr()) {
+        char left[MAX_STRING_LEN], right[MAX_STRING_LEN];
+        str_expr(left);
+        skip_spaces();
+        int op = 0;  // 0=none, 1==, 2=<>, 3=<, 4=>, 5=<=, 6=>=
+        if (*ptr == '<' && *(ptr+1) == '>') { ptr += 2; op = 2; }
+        else if (*ptr == '<' && *(ptr+1) == '=') { ptr += 2; op = 5; }
+        else if (*ptr == '>' && *(ptr+1) == '=') { ptr += 2; op = 6; }
+        else if (*ptr == '<') { ptr++; op = 3; }
+        else if (*ptr == '>') { ptr++; op = 4; }
+        else if (*ptr == '=') { ptr++; op = 1; }
+        if (op == 0) return left[0] ? -1 : 0;  // Non-empty string = true
+        str_expr(right);
+        int cmp = 0;
+        for (int i = 0; ; i++) {
+            if (left[i] != right[i]) { cmp = (unsigned char)left[i] - (unsigned char)right[i]; break; }
+            if (left[i] == '\0') break;
+        }
+        switch (op) {
+            case 1: return cmp == 0;
+            case 2: return cmp != 0;
+            case 3: return cmp < 0;
+            case 4: return cmp > 0;
+            case 5: return cmp <= 0;
+            case 6: return cmp >= 0;
+        }
+        return 0;
+    }
     int32_t left = arith_expr();
     skip_spaces();
 
@@ -1486,6 +1557,17 @@ static void stmt_for(void) {
     int idx = get_or_create_var(name, 0);
     if (idx < 0) { error("TOO MANY VARS"); return; }
 
+    // Check if we're re-entering an existing FOR loop on same line (inline loop)
+    if (for_sp > 0 && for_stack[for_sp-1].var_idx == idx
+                   && for_stack[for_sp-1].return_line == current_line) {
+        // Skip past the FOR initialization - we're in a loop iteration
+        skip_spaces(); if (*ptr == '=') ptr++;
+        expr();  // skip start value
+        skip_spaces(); match_keyword("TO"); expr();  // skip limit
+        skip_spaces(); if (match_keyword("STEP")) expr();  // skip step
+        return;
+    }
+
     skip_spaces();
     if (*ptr == '=') ptr++;
     int32_t start = expr();
@@ -1525,7 +1607,7 @@ static void stmt_next(void) {
                            : variables[f->var_idx].int_val < f->limit;
 
     if (done) for_sp--;
-    else current_line = f->return_line;
+    else { current_line = f->return_line; jump_pending = 1; }
 }
 
 static void stmt_while(void) {
@@ -2059,6 +2141,105 @@ static void stmt_color(void) {
     display_set_color((uint8_t)fg, (uint8_t)bg);
 }
 
+// RANDOMIZE [seed]
+static void stmt_randomize(void) {
+    skip_spaces();
+    if (*ptr && *ptr != ':' && *ptr != '\'') {
+        rng_state = (uint32_t)expr();
+    } else {
+        rng_state = 12345;  // Default seed
+    }
+}
+
+// SWAP var1, var2
+static void stmt_swap(void) {
+    skip_spaces();
+    char name1[MAX_VAR_NAME], name2[MAX_VAR_NAME];
+    int is_str1 = parse_var_name(name1);
+    int idx1 = get_or_create_var(name1, is_str1);
+    skip_spaces();
+    if (*ptr == ',') ptr++;
+    skip_spaces();
+    int is_str2 = parse_var_name(name2);
+    int idx2 = get_or_create_var(name2, is_str2);
+    if (idx1 < 0 || idx2 < 0 || is_str1 != is_str2) return;
+    Variable *v1 = &variables[idx1], *v2 = &variables[idx2];
+    if (is_str1) {
+        char tmp[MAX_STRING_LEN];
+        str_copy(tmp, v1->str_val, MAX_STRING_LEN);
+        str_copy(v1->str_val, v2->str_val, MAX_STRING_LEN);
+        str_copy(v2->str_val, tmp, MAX_STRING_LEN);
+    } else {
+        int32_t tmp = v1->int_val;
+        v1->int_val = v2->int_val;
+        v2->int_val = tmp;
+    }
+}
+
+// SLEEP n (n seconds, busy-wait)
+static void stmt_sleep(void) {
+    skip_spaces();
+    int32_t n = expr();
+    (void)n;  // In emulator, just continue (no real delay)
+}
+
+// BEEP
+static void stmt_beep(void) {
+    // No audio in emulator, just ignore
+}
+
+// ERASE arrayname
+static void stmt_erase(void) {
+    skip_spaces();
+    char name[MAX_VAR_NAME];
+    int is_string = parse_var_name(name);
+    int idx = find_var(name, is_string);
+    if (idx < 0) return;
+    Variable *v = &variables[idx];
+    if (!v->is_array) return;
+    // Reset array to zeros/empty strings
+    for (int i = 0; i < v->array_size; i++) {
+        if (is_string) v->str_array[i][0] = '\0';
+        else v->int_array[i] = 0;
+    }
+}
+
+// LINE INPUT [prompt;] var$
+static void stmt_line_input(void) {
+    skip_spaces();
+    // Optional prompt
+    if (*ptr == '"') {
+        ptr++;
+        while (*ptr && *ptr != '"') print_char(*ptr++);
+        if (*ptr == '"') ptr++;
+        skip_spaces();
+        if (*ptr == ';' || *ptr == ',') ptr++;
+        skip_spaces();
+    }
+    if (!is_alpha(*ptr)) return;
+    char name[MAX_VAR_NAME];
+    int is_string = parse_var_name(name);
+    if (!is_string) return;  // LINE INPUT only for strings
+    int idx = get_or_create_var(name, 1);
+    if (idx < 0) return;
+    Variable *v = &variables[idx];
+    // Read entire line including commas
+    char buf[MAX_STRING_LEN];
+    int pos = 0;
+    while (pos < MAX_STRING_LEN - 1) {
+        int c = getchar();
+        if (c == '\r' || c == '\n') { putchar('\n'); break; }
+        if (c == 8 || c == 127) {
+            if (pos > 0) { pos--; putchar(8); putchar(' '); putchar(8); }
+            continue;
+        }
+        buf[pos++] = c;
+        putchar(c);
+    }
+    buf[pos] = '\0';
+    str_copy(v->str_val, buf, MAX_STRING_LEN);
+}
+
 // Check if at end of statement (for block IF detection)
 static int is_end_of_stmt(void) {
     const char *p = ptr;
@@ -2402,12 +2583,20 @@ static void execute_line(const char *line) {
         else if (match_keyword("RESTORE")) stmt_restore();
         else if (match_keyword("CLS")) stmt_cls();
         else if (match_keyword("PSET")) stmt_pset();
-        else if (match_keyword("LINE")) stmt_line();
+        else if (match_keyword("LINE")) {
+            if (match_keyword("INPUT")) stmt_line_input();
+            else stmt_line();
+        }
         else if (match_keyword("CIRCLE")) stmt_circle();
         else if (match_keyword("FCIRCLE")) stmt_fcircle();
         else if (match_keyword("PAINT")) stmt_paint();
         else if (match_keyword("LOCATE")) stmt_locate();
         else if (match_keyword("COLOR")) stmt_color();
+        else if (match_keyword("RANDOMIZE")) stmt_randomize();
+        else if (match_keyword("SWAP")) stmt_swap();
+        else if (match_keyword("SLEEP")) stmt_sleep();
+        else if (match_keyword("BEEP")) stmt_beep();
+        else if (match_keyword("ERASE")) stmt_erase();
         else if (match_keyword("END") || match_keyword("STOP")) { running = 0; return; }
         else if (is_alpha(*ptr)) stmt_let();  // Implicit LET
         else { while (*ptr && *ptr != ':') ptr++; }
@@ -2456,8 +2645,9 @@ static void cmd_run(void) {
     scan_subs();  // Scan for SUB/FUNCTION definitions
 
     while (running && current_line < num_lines) {
+        jump_pending = 0;
         execute_line(program[current_line]);
-        current_line++;
+        if (!jump_pending) current_line++;
     }
     running = 0;
 }
