@@ -11,7 +11,7 @@ LD       := $(PREFIX)ld
 OBJCOPY  := $(PREFIX)objcopy
 OBJDUMP  := $(PREFIX)objdump
 
-ARCH     := -march=rv32imac -mabi=ilp32
+ARCH     := -march=rv32imac_zicsr -mabi=ilp32
 
 ASFLAGS  := $(ARCH) -Isrc
 CFLAGS   := $(ARCH) -O2 -ffreestanding -nostdlib -Wall -Wextra -Isrc

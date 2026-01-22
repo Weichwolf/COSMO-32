@@ -100,6 +100,9 @@ struct EmulatorContext {
 
         // Connect CPU to PFIC
         cpu.set_pfic(&pfic);
+
+        // Connect USART to PFIC for RX interrupts
+        usart1.set_pfic(&pfic);
     }
 
     bool load_firmware(const char* path) {
@@ -156,6 +159,17 @@ bool run_test(const char* path, bool verbose) {
 
     while (emu.cpu.cycles < MAX_CYCLES && !emu.cpu.halted) {
         emu.tick_peripherals();
+
+        // Handle WFI - check for pending interrupts to wake
+        if (emu.cpu.wfi) {
+            emu.cpu.check_interrupts();
+            if (emu.cpu.wfi) {
+                // Still waiting - increment cycles to avoid infinite loop
+                emu.cpu.cycles++;
+                continue;
+            }
+        }
+
         emu.cpu.step();
 
         TestResult result = check_test_result(emu.cpu);
@@ -398,16 +412,13 @@ void run_emulator(const char* firmware_path) {
                         running = false;
                     } else if (event.key.keysym.sym == SDLK_RETURN) {
                         emu.usart1.queue_input("\n");
-                        emu.cpu.wfi = false;  // Wake from WFI on input
                     } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
                         emu.usart1.queue_input("\b");
-                        emu.cpu.wfi = false;
                     }
                     break;
 
                 case SDL_TEXTINPUT:
                     emu.usart1.queue_input(event.text.text);
-                    emu.cpu.wfi = false;  // Wake from WFI on input
                     break;
             }
         }
@@ -424,9 +435,10 @@ void run_emulator(const char* firmware_path) {
                 break;
             }
         }
-        // If CPU is waiting for interrupt, just tick peripherals
+        // If CPU is waiting for interrupt, tick peripherals and check for wakeup
         if (emu.cpu.wfi) {
             emu.tick_peripherals();
+            emu.cpu.check_interrupts();  // May wake from WFI and take interrupt
         }
 
         // Render display

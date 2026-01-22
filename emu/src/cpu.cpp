@@ -73,6 +73,21 @@ void CPU::take_trap(TrapCause cause, uint32_t tval) {
 }
 
 void CPU::take_interrupt(InterruptCause cause) {
+    // If PC points to a WFI instruction, skip it.
+    // WFI should return immediately when an interrupt is pending,
+    // so we skip it and set mepc to the instruction AFTER WFI.
+    uint32_t inst = bus->read32(pc);
+    uint32_t inst_len = 4;
+    if (is_compressed(inst)) {
+        inst = expand_compressed(inst & 0xFFFF);
+        inst_len = 2;
+    }
+    // Check if it's WFI (opcode 0x73, funct3=0, funct12=0x105)
+    if ((inst & 0x7F) == 0x73 && ((inst >> 12) & 0x7) == 0 &&
+        ((inst >> 20) & 0xFFF) == 0x105) {
+        pc += inst_len;  // Skip WFI
+    }
+
     mepc = pc;
     // Interrupt bit (bit 31) + cause
     mcause = 0x80000000 | static_cast<uint32_t>(cause);
@@ -100,12 +115,22 @@ void CPU::mret() {
 }
 
 bool CPU::check_interrupts() {
+    // Sync mip.MEIE with PFIC state: set if any enabled interrupt pending
+    if (pfic) {
+        if (pfic->get_pending_irq() >= 0) {
+            mip |= MIE_MEIE;
+        } else {
+            mip &= ~MIE_MEIE;
+        }
+    }
+
+    // Wake from WFI if any interrupt pending and enabled (regardless of mstatus.MIE)
+    if (wfi && (mip & mie)) {
+        wfi = false;
+    }
+
     // Check if interrupts are globally enabled
     if (!interrupts_enabled()) {
-        // But still wake from WFI if any interrupt pending
-        if (wfi && (mip & mie)) {
-            wfi = false;
-        }
         return false;
     }
 
@@ -118,13 +143,11 @@ bool CPU::check_interrupts() {
             if (irq >= 0) {
                 pfic->set_active(irq);
                 take_interrupt(InterruptCause::MExternal);
-                wfi = false;
                 return true;
             }
         } else {
             take_interrupt(InterruptCause::MExternal);
             mip &= ~MIE_MEIE;  // Clear pending
-            wfi = false;
             return true;
         }
     }
@@ -133,7 +156,6 @@ bool CPU::check_interrupts() {
     if ((mip & MIE_MTIE) && (mie & MIE_MTIE)) {
         take_interrupt(InterruptCause::MTimer);
         // Timer pending is typically cleared by writing to mtimecmp
-        wfi = false;
         return true;
     }
 
@@ -141,7 +163,6 @@ bool CPU::check_interrupts() {
     if ((mip & MIE_MSIE) && (mie & MIE_MSIE)) {
         take_interrupt(InterruptCause::MSoftware);
         mip &= ~MIE_MSIE;  // Clear pending
-        wfi = false;
         return true;
     }
 
@@ -151,10 +172,16 @@ bool CPU::check_interrupts() {
 void CPU::step() {
     if (halted) return;
 
-    // Check for pending interrupts
-    if (check_interrupts()) {
-        cycles++;
-        return;  // Interrupt taken, will execute handler next step
+    // Sync mip with PFIC and wake from WFI if needed (but don't take interrupt yet)
+    if (pfic) {
+        if (pfic->get_pending_irq() >= 0) {
+            mip |= MIE_MEIE;
+        } else {
+            mip &= ~MIE_MEIE;
+        }
+    }
+    if (wfi && (mip & mie)) {
+        wfi = false;
     }
 
     if (wfi) return;  // Still waiting for interrupt
@@ -198,9 +225,19 @@ void CPU::step() {
 
     pc += inst_len_;
     cycles++;
+
+    // Check for pending interrupts AFTER instruction completes
+    // This ensures mepc points to the NEXT instruction (not the current one)
+    if (check_interrupts()) {
+        cycles++;
+    }
 }
 
 void CPU::run(uint64_t target_cycles) {
+    // Check interrupts first (syncs mip with PFIC, wakes from WFI if needed)
+    check_interrupts();
+    if (halted || wfi) return;
+
     // Cache frequently accessed members in locals
     uint32_t pc_ = pc;
     uint64_t cycles_ = cycles;
@@ -392,13 +429,21 @@ void CPU::run(uint64_t target_cycles) {
                 cycles_++;
                 continue;
 
-            case 0x1C: // SYSTEM
+            case 0x1C: { // SYSTEM
                 pc = pc_; cycles = cycles_;
                 inst_len_ = inst_len;
+                uint32_t f3_sys = (inst >> 12) & 0x7;
                 exec_system(inst);
                 pc_ = pc; cycles_ = cycles;
                 if (wfi) goto exit;
+                // CSR instructions (funct3 != 0) need PC increment
+                // ECALL/EBREAK/MRET/WFI (funct3 == 0) handle PC themselves
+                if (f3_sys != 0) {
+                    pc_ += inst_len;
+                    cycles_++;
+                }
                 continue;
+            }
 
             case 0x0B: // AMO
                 pc = pc_; cycles = cycles_;
@@ -747,7 +792,14 @@ void CPU::exec_system(uint32_t inst) {
                 mret();
                 return;
             case 0x105: // WFI
-                wfi = true;
+                // Increment PC first
+                pc += inst_len_;
+                cycles++;
+                // If an interrupt is pending and enabled, WFI is a NOP
+                // (the interrupt will be taken at the end of step())
+                if ((mip & mie) == 0) {
+                    wfi = true;
+                }
                 return;
             default:
                 illegal_instruction(inst);

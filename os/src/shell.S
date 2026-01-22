@@ -78,13 +78,41 @@ hex_chars:      .asciz "0123456789ABCDEF"
 .global print_dec
 
 #----------------------------------------------------------------------
-# shell_init: Initialize USART for TX/RX
+# shell_init: Initialize USART for TX/RX with interrupt support
 #----------------------------------------------------------------------
 shell_init:
+    # Setup trap vector (direct mode)
+    la      t0, trap_handler
+    csrw    mtvec, t0
+
+    # Enable USART1 with TX, RX and RX interrupt
     li      t0, USART1_BASE
-    li      t1, CTLR1_UE | CTLR1_TE | CTLR1_RE
+    li      t1, CTLR1_UE | CTLR1_TE | CTLR1_RE | CTLR1_RXNEIE
     sw      t1, USART_CTLR1(t0)
+
+    # Enable USART1 IRQ in PFIC (IRQ 37 = bit 5 in IENR1)
+    li      t0, PFIC_BASE
+    li      t1, (1 << (USART1_IRQ - 32))
+    sw      t1, PFIC_IENR1(t0)
+
+    # Enable machine external interrupts in mie
+    li      t0, MIE_MEIE
+    csrs    mie, t0
+
+    # Enable global interrupts in mstatus
+    li      t0, MSTATUS_MIE
+    csrs    mstatus, t0
+
     ret
+
+#----------------------------------------------------------------------
+# trap_handler: Minimal interrupt/exception handler
+# For USART RX: just return, data will be read by getchar
+#----------------------------------------------------------------------
+.align 4
+trap_handler:
+    # Simply return - WFI will be woken, getchar will read data
+    mret
 
 #----------------------------------------------------------------------
 # shell_run: Main shell loop
@@ -751,14 +779,16 @@ putchar:
     addi    sp, sp, 8
     ret
 
-# getchar: Read a character (blocking)
+# getchar: Read a character (blocking with WFI)
 # Returns: a0 = character
 getchar:
     li      t0, USART1_BASE
 1:  lw      t1, USART_STATR(t0)
     andi    t1, t1, STATR_RXNE
-    beqz    t1, 1b              # Busy-wait (no WFI)
-    lw      a0, USART_DATAR(t0)
+    bnez    t1, 2f              # Data available, read it
+    wfi                         # Wait for interrupt (USART RX)
+    j       1b                  # Re-check after wakeup
+2:  lw      a0, USART_DATAR(t0)
     andi    a0, a0, 0xFF
     ret
 

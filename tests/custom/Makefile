@@ -7,7 +7,7 @@ OBJDUMP = $(PREFIX)objdump
 ASFLAGS = -march=rv32imac_zicsr -mabi=ilp32
 LDFLAGS = -T test.ld -m elf32lriscv
 
-TESTS = basic mul branch compressed atomic usart timer interrupt dma fsmc display i2s eth icmp dhcp tftp tftp_read tftp_write tftp_rw
+TESTS = basic mul branch compressed atomic usart timer interrupt wfi dma fsmc display i2s eth icmp dhcp tftp tftp_read tftp_write tftp_rw
 
 all: $(addsuffix .bin,$(TESTS))
 

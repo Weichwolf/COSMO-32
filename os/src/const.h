@@ -37,6 +37,32 @@
 #define PFIC_BASE       0xE000E000
 
 //----------------------------------------------------------------------
+// PFIC Registers (offset from PFIC_BASE)
+//----------------------------------------------------------------------
+
+#define PFIC_IENR0      0x100   // Interrupt Enable Set (IRQ 0-31)
+#define PFIC_IENR1      0x104   // Interrupt Enable Set (IRQ 32-63)
+#define PFIC_IPRR0      0x280   // Interrupt Pending Clear (IRQ 0-31)
+#define PFIC_IPRR1      0x284   // Interrupt Pending Clear (IRQ 32-63)
+
+//----------------------------------------------------------------------
+// RISC-V CSR addresses
+//----------------------------------------------------------------------
+
+#define CSR_MSTATUS     0x300
+#define CSR_MIE         0x304
+#define CSR_MTVEC       0x305
+#define CSR_MEPC        0x341
+#define CSR_MCAUSE      0x342
+
+// mstatus bits
+#define MSTATUS_MIE     (1 << 3)    // Machine Interrupt Enable
+#define MSTATUS_MPIE    (1 << 7)    // Machine Previous Interrupt Enable
+
+// mie bits
+#define MIE_MEIE        (1 << 11)   // Machine External Interrupt Enable
+
+//----------------------------------------------------------------------
 // USART Registers (offset from USART1_BASE)
 //----------------------------------------------------------------------
 
@@ -51,8 +77,12 @@
 
 // USART_CTLR1 bits
 #define CTLR1_UE        (1 << 13)
+#define CTLR1_RXNEIE    (1 << 5)
 #define CTLR1_TE        (1 << 3)
 #define CTLR1_RE        (1 << 2)
+
+// USART1 IRQ number (CH32V307)
+#define USART1_IRQ      37
 
 //----------------------------------------------------------------------
 // Timer Registers (offset from TIMER_BASE)

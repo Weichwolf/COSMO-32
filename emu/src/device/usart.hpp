@@ -1,5 +1,6 @@
 #pragma once
 #include "../bus.hpp"
+#include "pfic.hpp"
 #include <cstdio>
 #include <deque>
 #include <functional>
@@ -24,9 +25,13 @@ public:
     static constexpr uint32_t STATR_RXNE = 1 << 5;  // RX not empty
 
     // Control register 1 bits
-    static constexpr uint32_t CTLR1_UE   = 1 << 13; // USART enable
-    static constexpr uint32_t CTLR1_TE   = 1 << 3;  // TX enable
-    static constexpr uint32_t CTLR1_RE   = 1 << 2;  // RX enable
+    static constexpr uint32_t CTLR1_UE     = 1 << 13; // USART enable
+    static constexpr uint32_t CTLR1_RXNEIE = 1 << 5;  // RXNE interrupt enable
+    static constexpr uint32_t CTLR1_TE     = 1 << 3;  // TX enable
+    static constexpr uint32_t CTLR1_RE     = 1 << 2;  // RX enable
+
+    // Default IRQ number for USART1 (CH32V307)
+    static constexpr uint32_t DEFAULT_IRQ = 37;
 
     // RX queue limit (matches shell buffer size in OS)
     static constexpr size_t RX_QUEUE_MAX = 4096;
@@ -42,14 +47,24 @@ private:
 
     std::deque<uint8_t> rx_queue_;
     OutputCallback output_cb_;
+    PFIC* pfic_ = nullptr;
+    uint32_t irq_num_ = DEFAULT_IRQ;
+
+    void update_irq();
 
 public:
     USART() : output_cb_([](char c) { std::putchar(c); std::fflush(stdout); }) {}
+
+    void set_pfic(PFIC* pfic, uint32_t irq = DEFAULT_IRQ) {
+        pfic_ = pfic;
+        irq_num_ = irq;
+    }
 
     // Queue input byte (called from host)
     void queue_input(uint8_t byte) {
         if (rx_queue_.size() < RX_QUEUE_MAX) {
             rx_queue_.push_back(byte);
+            update_irq();
         }
     }
 
@@ -58,6 +73,7 @@ public:
         while (*str && rx_queue_.size() < RX_QUEUE_MAX) {
             rx_queue_.push_back(static_cast<uint8_t>(*str++));
         }
+        update_irq();
     }
 
     bool has_input() const { return !rx_queue_.empty(); }
@@ -77,10 +93,14 @@ public:
                 return statr;
             }
             case 0x04: {
-                // DATAR - read clears RXNE
+                // DATAR - read clears RXNE (and potentially IRQ)
                 if (!rx_queue_.empty()) {
                     uint8_t byte = rx_queue_.front();
                     rx_queue_.pop_front();
+                    // Clear IRQ if queue now empty
+                    if (rx_queue_.empty() && pfic_) {
+                        pfic_->clear_pending(irq_num_);
+                    }
                     return byte;
                 }
                 return 0;
@@ -106,7 +126,10 @@ public:
                 }
                 break;
             case 0x08: brr_ = val; break;
-            case 0x0C: ctlr1_ = val; break;
+            case 0x0C:
+                ctlr1_ = val;
+                update_irq();  // Re-evaluate IRQ when RXNEIE changes
+                break;
             case 0x10: ctlr2_ = val; break;
             case 0x14: ctlr3_ = val; break;
             case 0x18: gpr_ = val; break;
@@ -115,6 +138,16 @@ public:
 
     bool is_enabled() const { return ctlr1_ & CTLR1_UE; }
     bool is_tx_enabled() const { return ctlr1_ & CTLR1_TE; }
+    bool is_rxne_irq_enabled() const { return ctlr1_ & CTLR1_RXNEIE; }
 };
+
+inline void USART::update_irq() {
+    if (!pfic_) return;
+
+    // Set IRQ pending if RXNE and RXNEIE both set
+    if (!rx_queue_.empty() && (ctlr1_ & CTLR1_RXNEIE)) {
+        pfic_->set_pending(irq_num_);
+    }
+}
 
 } // namespace cosmo
