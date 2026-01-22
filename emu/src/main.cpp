@@ -380,9 +380,12 @@ void run_emulator(const char* firmware_path) {
     SDL_StartTextInput();
 
     constexpr uint64_t CYCLES_PER_FRAME = 144'000'000 / 60;
+    constexpr uint32_t FRAME_TIME_MS = 1000 / 60;  // ~16ms for 60fps
 
     bool running = true;
     while (running && !emu.cpu.halted) {
+        uint32_t frame_start = SDL_GetTicks();
+
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -395,20 +398,23 @@ void run_emulator(const char* firmware_path) {
                         running = false;
                     } else if (event.key.keysym.sym == SDLK_RETURN) {
                         emu.usart1.queue_input("\n");
+                        emu.cpu.wfi = false;  // Wake from WFI on input
                     } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
                         emu.usart1.queue_input("\b");
+                        emu.cpu.wfi = false;
                     }
                     break;
 
                 case SDL_TEXTINPUT:
                     emu.usart1.queue_input(event.text.text);
+                    emu.cpu.wfi = false;  // Wake from WFI on input
                     break;
             }
         }
 
-        // Run CPU for one frame
+        // Run CPU for one frame (or until WFI)
         uint64_t target = emu.cpu.cycles + CYCLES_PER_FRAME;
-        while (emu.cpu.cycles < target && !emu.cpu.halted) {
+        while (emu.cpu.cycles < target && !emu.cpu.halted && !emu.cpu.wfi) {
             emu.tick_peripherals();
             emu.cpu.step();
 
@@ -417,6 +423,10 @@ void run_emulator(const char* firmware_path) {
                 emu.cpu.halted = true;
                 break;
             }
+        }
+        // If CPU is waiting for interrupt, just tick peripherals
+        if (emu.cpu.wfi) {
+            emu.tick_peripherals();
         }
 
         // Render display
@@ -427,6 +437,16 @@ void run_emulator(const char* firmware_path) {
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, active_tex, nullptr, nullptr);
         SDL_RenderPresent(renderer);
+
+        // Frame timing - sleep to maintain 60fps (or longer if idle)
+        uint32_t frame_time = SDL_GetTicks() - frame_start;
+        uint32_t sleep_time = FRAME_TIME_MS;
+        if (emu.cpu.wfi && !emu.usart1.has_input()) {
+            sleep_time = 100;  // Sleep longer when idle (100ms)
+        }
+        if (frame_time < sleep_time) {
+            SDL_Delay(sleep_time - frame_time);
+        }
     }
 
     std::printf("Emulator stopped after %lu cycles\n", static_cast<unsigned long>(emu.cpu.cycles));
