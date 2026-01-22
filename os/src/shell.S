@@ -757,10 +757,8 @@ getchar:
     li      t0, USART1_BASE
 1:  lw      t1, USART_STATR(t0)
     andi    t1, t1, STATR_RXNE
-    bnez    t1, 2f
-    wfi                         # Sleep until interrupt/event
-    j       1b
-2:  lw      a0, USART_DATAR(t0)
+    beqz    t1, 1b              # Busy-wait (no WFI)
+    lw      a0, USART_DATAR(t0)
     andi    a0, a0, 0xFF
     ret
 
