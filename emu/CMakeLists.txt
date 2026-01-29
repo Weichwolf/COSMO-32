@@ -44,5 +44,8 @@ target_include_directories(cosmo32 PRIVATE
 
 target_link_libraries(cosmo32 PRIVATE
     SDL2::SDL2
-    ws2_32  # Windows sockets für UDP/TCP proxy
 )
+
+if(WIN32)
+    target_link_libraries(cosmo32 PRIVATE ws2_32)
+endif()

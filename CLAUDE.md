@@ -41,7 +41,7 @@ COSMO-32/
 │   │   └── font8x8.h             # 8x8 Bitmap-Font (CP437-Style)
 │   ├── link.ld
 │   └── Makefile
-├── tests/custom/                 # CPU + Peripheral Tests (19 Tests)
+├── tests/custom/                 # CPU + Peripheral Tests (20 Tests)
 │   ├── *.s
 │   └── Makefile
 └── fs/                           # TFTP-Dateisystem (Host)
@@ -58,19 +58,17 @@ make -C os                                               # OS
 ## Ausführen
 
 ```bash
-./emu/build/cosmo32.exe os/firmware.bin                  # Interaktiv (SDL2 Fenster)
-./emu/build/cosmo32.exe --run-tests tests/custom/        # 19 Tests
-./emu/build/cosmo32.exe --headless os/firmware.bin --cmd "help" --timeout 2000
-./emu/build/cosmo32.exe --headless os/firmware.bin --timeout 500 --screenshot out.ppm
+./emu/build/cosmo32 os/firmware.bin                      # Interaktiv (SDL2 Fenster)
+./emu/build/cosmo32 --run-tests tests/custom/            # 20 Tests
+./emu/build/cosmo32 --headless os/firmware.bin --cmd "help" --timeout 2000
+./emu/build/cosmo32 --headless os/firmware.bin --timeout 500 --screenshot out.ppm
 ```
 
 Shell-Befehle: `help` zeigt alle. BASIC: `basic` (interaktiv) oder `basic apps/file.bas`.
 
-## PATH (kritisch!)
+## Build-Umgebung
 
-Außerhalb UCRT64-Shell: `export PATH="/c/msys64/ucrt64/bin:/usr/bin:/bin:$PATH"`
-
-Sonst ABI-Mismatch (MINGW64-DLLs), Compiler scheitert mit Exit 1 ohne Output.
+Linux (Debian). Benötigte Pakete: `cmake ninja-build gcc-riscv64-unknown-elf libsdl2-dev`
 
 ## Eingebaute Netzwerk-Services
 
@@ -91,7 +89,7 @@ Logging bei Fehlern (stderr):
 
 ## Status
 
-**Emulator:** CPU, Bus, USART, Timer, PFIC, DMA, FSMC, Display, I2S, ETH, SDL2 Frontend (19 Tests pass)
+**Emulator:** CPU, Bus, USART, Timer, PFIC, DMA, FSMC, Display, I2S, ETH, SDL2 Frontend (20 Tests pass)
 
 **OS:** Shell, Netzwerk-Stack (UDP/TFTP), BASIC-Interpreter, Display-Treiber (80×50 Terminal)
 

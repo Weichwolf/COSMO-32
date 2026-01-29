@@ -431,7 +431,7 @@ void run_emulator(const char* firmware_path) {
         // Run CPU for one frame worth of cycles (144 MHz / 60 FPS = 2.4M cycles)
         uint64_t target = emu.cpu.cycles + CYCLES_PER_FRAME;
         while (emu.cpu.cycles < target && !emu.cpu.halted && !emu.cpu.wfi) {
-            uint64_t batch = std::min(emu.cpu.cycles + 10000ULL, target);
+            uint64_t batch = std::min<uint64_t>(emu.cpu.cycles + 10000ULL, target);
             emu.cpu.run(batch);
             emu.tick_peripherals();
 
